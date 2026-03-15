@@ -73,6 +73,34 @@ function formatDateLabel(dateString: string) {
   const date = new Date(year, month - 1, day);
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
+function sortMatchesChronologically(
+  matches: any[],
+  poolDates: { id: string; label: string; date: string }[]
+) {
+  const dateOrder = new Map<string, number>();
+
+  poolDates.forEach((d, index) => {
+    dateOrder.set(d.id, index);
+  });
+
+  return [...matches].sort((a, b) => {
+    const aDateOrder =
+      a.slotDateId === "playoff" || a.slot_date_code === "playoff"
+        ? 999
+        : dateOrder.get(a.slotDateId || a.slot_date_code || "") ?? 999;
+
+    const bDateOrder =
+      b.slotDateId === "playoff" || b.slot_date_code === "playoff"
+        ? 999
+        : dateOrder.get(b.slotDateId || b.slot_date_code || "") ?? 999;
+
+    if (aDateOrder !== bDateOrder) return aDateOrder - bDateOrder;
+    if ((a.startTime || "") !== (b.startTime || "")) {
+      return (a.startTime || "").localeCompare(b.startTime || "");
+    }
+    return (a.court || 0) - (b.court || 0);
+  });
+}
 function getDisplayDayLabel(
   match: any,
   poolDates: { id: string; label: string; date: string }[]
@@ -196,7 +224,7 @@ export default function PickleballTournamentWebsite() {
     availability: [] as string[],
   });
   const [message, setMessage] = useState("");
-
+  const [selectedPlayer, setSelectedPlayer] = useState("all");
   const loadPublicData = useCallback(async () => {
     const { data: settingsData } = await supabase
       .from("tournament_settings")
@@ -353,11 +381,21 @@ export default function PickleballTournamentWebsite() {
     };
   }, [loadPublicData]);
 
-  const approvedPlayers = players.filter((p) => p.status === "approved");
-  const standings = useMemo(() => standingsByPool(matches, players), [matches, players]);
-  const completed = matches.filter((m) => m.s1 !== "" && m.s2 !== "").length;
-  const upcoming = matches.length - completed;
-  const pools = useMemo(() => chunkIntoPools(players), [players]);
+const sortedMatches = useMemo(
+  () => sortMatchesChronologically(matches, poolDates),
+  [matches, poolDates]
+);
+const filteredMatches = useMemo(() => {
+  if (selectedPlayer === "all") return sortedMatches;
+  return sortedMatches.filter(
+    (m) => m.p1 === selectedPlayer || m.p2 === selectedPlayer
+  );
+}, [sortedMatches, selectedPlayer]);
+const approvedPlayers = players.filter((p) => p.status === "approved");
+const standings = useMemo(() => standingsByPool(matches, players), [matches, players]);
+const completed = matches.filter((m) => m.s1 !== "" && m.s2 !== "").length;
+const upcoming = matches.length - completed;
+const pools = useMemo(() => chunkIntoPools(players), [players]);
 
   const finalists = useMemo(() => {
     const a1 = standings.A[0]?.player || "TBD";
@@ -636,6 +674,24 @@ export default function PickleballTournamentWebsite() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
+                    
+                    <div className="mb-4 flex flex-col gap-2 md:w-80">
+    <Label htmlFor="player-filter">Filter by player</Label>
+    <select
+      id="player-filter"
+      className="rounded-md border px-3 py-2 bg-white"
+      value={selectedPlayer}
+      onChange={(e) => setSelectedPlayer(e.target.value)}
+    >
+      <option value="all">All players</option>
+      {approvedPlayers.map((player) => (
+        <option key={player.id} value={player.name}>
+          {player.name}
+        </option>
+      ))}
+    </select>
+  </div>
+
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -649,7 +705,7 @@ export default function PickleballTournamentWebsite() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {matches.map((m) => (
+                      {filteredMatches.map((m) => (
                         <TableRow key={m.id}>
                           <TableCell>{m.round}</TableCell>
                           <TableCell>{m.pool}</TableCell>

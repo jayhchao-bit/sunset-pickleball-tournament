@@ -124,50 +124,146 @@ function assignMatchesToAvailabilitySlots(
 ) {
   const availabilityMap = getPlayerAvailabilityMap(playersInPool);
   const slots = buildPoolSlots(courtCount, weekdayStart, poolDates);
+
   const scheduledCounts = Object.fromEntries(playersInPool.map((p) => [p.name, 0]));
+  const lastSlotIndex = Object.fromEntries(playersInPool.map((p) => [p.name, -99]));
+
   const unassigned = rawMatches.map((m) => ({ ...m }));
   const scheduled: any[] = [];
 
-  slots.forEach((slot) => {
+  slots.forEach((slot, slotIndex) => {
     const usedPlayers = new Set<string>();
 
     for (let court = 1; court <= courtCount; court += 1) {
-      const eligible = unassigned.filter(
-        (m) => !m.assigned && !usedPlayers.has(m.p1) && !usedPlayers.has(m.p2)
-      );
+      const eligible = unassigned.filter((m) => {
+        if (m.assigned) return false;
+        if (usedPlayers.has(m.p1) || usedPlayers.has(m.p2)) return false;
+
+        const p1Avail = availabilityMap[m.p1] || [];
+        const p2Avail = availabilityMap[m.p2] || [];
+
+        const p1Available = p1Avail.includes(slot.dateId);
+        const p2Available = p2Avail.includes(slot.dateId);
+
+        return p1Available && p2Available;
+      });
+
       if (!eligible.length) break;
 
-      eligible.sort(
-        (a, b) =>
-          scoreMatchForSlot(b, slot, scheduledCounts, availabilityMap) -
-          scoreMatchForSlot(a, slot, scheduledCounts, availabilityMap)
-      );
+      eligible.sort((a, b) => {
+        const aPenalty =
+          (scheduledCounts[a.p1] || 0) +
+          (scheduledCounts[a.p2] || 0) +
+          (slotIndex - (lastSlotIndex[a.p1] ?? -99) <= 1 ? 5 : 0) +
+          (slotIndex - (lastSlotIndex[a.p2] ?? -99) <= 1 ? 5 : 0);
+
+        const bPenalty =
+          (scheduledCounts[b.p1] || 0) +
+          (scheduledCounts[b.p2] || 0) +
+          (slotIndex - (lastSlotIndex[b.p1] ?? -99) <= 1 ? 5 : 0) +
+          (slotIndex - (lastSlotIndex[b.p2] ?? -99) <= 1 ? 5 : 0);
+
+        return aPenalty - bPenalty;
+      });
 
       const chosen = eligible[0];
       chosen.assigned = true;
+
       usedPlayers.add(chosen.p1);
       usedPlayers.add(chosen.p2);
+
       scheduledCounts[chosen.p1] += 1;
       scheduledCounts[chosen.p2] += 1;
 
-      const p1Avail = availabilityMap[chosen.p1] || [];
-      const p2Avail = availabilityMap[chosen.p2] || [];
+      lastSlotIndex[chosen.p1] = slotIndex;
+      lastSlotIndex[chosen.p2] = slotIndex;
 
       scheduled.push({
         ...chosen,
         court,
         slotDateId: slot.dateId,
-        dayLabel: slot.dayLabel,
+        dayLabel: `${slot.dayLabel}`,
         startTime: slot.startTime,
         endTime: slot.endTime,
-        preferredSlot: p1Avail.includes(slot.dateId) && p2Avail.includes(slot.dateId),
+        preferredSlot: true,
       });
     }
   });
 
+  // Fallback pass 1: allow at least one player available
+  slots.forEach((slot, slotIndex) => {
+    const usedPlayers = new Set(
+      scheduled
+        .filter((m) => m.slotDateId === slot.dateId && m.startTime === slot.startTime)
+        .flatMap((m) => [m.p1, m.p2])
+    );
+
+    const courtsUsed = scheduled.filter(
+      (m) => m.slotDateId === slot.dateId && m.startTime === slot.startTime
+    ).length;
+
+    for (let court = courtsUsed + 1; court <= courtCount; court += 1) {
+      const eligible = unassigned.filter((m) => {
+        if (m.assigned) return false;
+        if (usedPlayers.has(m.p1) || usedPlayers.has(m.p2)) return false;
+
+        const p1Avail = availabilityMap[m.p1] || [];
+        const p2Avail = availabilityMap[m.p2] || [];
+
+        const p1Available = p1Avail.includes(slot.dateId);
+        const p2Available = p2Avail.includes(slot.dateId);
+
+        return p1Available || p2Available;
+      });
+
+      if (!eligible.length) break;
+
+      eligible.sort((a, b) => {
+        const aPenalty =
+          (scheduledCounts[a.p1] || 0) +
+          (scheduledCounts[a.p2] || 0) +
+          (slotIndex - (lastSlotIndex[a.p1] ?? -99) <= 1 ? 5 : 0) +
+          (slotIndex - (lastSlotIndex[a.p2] ?? -99) <= 1 ? 5 : 0);
+
+        const bPenalty =
+          (scheduledCounts[b.p1] || 0) +
+          (scheduledCounts[b.p2] || 0) +
+          (slotIndex - (lastSlotIndex[b.p1] ?? -99) <= 1 ? 5 : 0) +
+          (slotIndex - (lastSlotIndex[b.p2] ?? -99) <= 1 ? 5 : 0);
+
+        return aPenalty - bPenalty;
+      });
+
+      const chosen = eligible[0];
+      chosen.assigned = true;
+
+      usedPlayers.add(chosen.p1);
+      usedPlayers.add(chosen.p2);
+
+      scheduledCounts[chosen.p1] += 1;
+      scheduledCounts[chosen.p2] += 1;
+
+      lastSlotIndex[chosen.p1] = slotIndex;
+      lastSlotIndex[chosen.p2] = slotIndex;
+
+      scheduled.push({
+        ...chosen,
+        court,
+        slotDateId: slot.dateId,
+        dayLabel: `${slot.dayLabel} • Partial Availability`,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+        preferredSlot: false,
+      });
+    }
+  });
+
+  // Fallback pass 2: force remaining matches anywhere
   const leftovers = unassigned.filter((m) => !m.assigned);
+
   leftovers.forEach((match, index) => {
     const slot = slots[index % slots.length];
+
     scheduled.push({
       ...match,
       court: (index % courtCount) + 1,
@@ -180,8 +276,12 @@ function assignMatchesToAvailabilitySlots(
   });
 
   return scheduled.sort((a, b) => {
-    if ((a.slotDateId || "") !== (b.slotDateId || "")) return (a.slotDateId || "").localeCompare(b.slotDateId || "");
-    if (a.startTime !== b.startTime) return a.startTime.localeCompare(b.startTime);
+    if ((a.slotDateId || "") !== (b.slotDateId || "")) {
+      return (a.slotDateId || "").localeCompare(b.slotDateId || "");
+    }
+    if (a.startTime !== b.startTime) {
+      return a.startTime.localeCompare(b.startTime);
+    }
     return a.court - b.court;
   });
 }
@@ -492,8 +592,22 @@ function generateRawRoundRobinMatches(
 ) {
   const matches: any[] = [];
 
+  const skipPairs = new Set<string>();
+
+  // For a 6-player pool, make it a modified round robin:
+  // each player skips exactly one opponent.
+  if (playersInPool.length === 6) {
+    skipPairs.add([0, 5].join("-")); // seed 1 skips seed 6
+    skipPairs.add([1, 4].join("-")); // seed 2 skips seed 5
+    skipPairs.add([2, 3].join("-")); // seed 3 skips seed 4
+  }
+
   for (let i = 0; i < playersInPool.length; i += 1) {
     for (let j = i + 1; j < playersInPool.length; j += 1) {
+      if (skipPairs.has([i, j].join("-"))) {
+        continue;
+      }
+
       matches.push({
         pool: poolLabel,
         stage: "pool",
