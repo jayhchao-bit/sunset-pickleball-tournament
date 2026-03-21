@@ -20,6 +20,14 @@ function addMinutes(timeString: string, minutesToAdd: number) {
   return `${String(nextHours).padStart(2, "0")}:${String(nextMinutes).padStart(2, "0")}`;
 }
 
+type Announcement = {
+  id: number;
+  title: string;
+  body: string;
+  priority: "info" | "warning" | "important";
+  created_at: string;
+};
+
 type PoolDate = {
   id: string;
   label: string;
@@ -49,6 +57,7 @@ type PlayerWithAvailability = {
   waiverSigned: boolean;
   status: string;
   availability: string[];
+  duprId?: string;
 };
 
 function chunkIntoPools(players: PlayerWithAvailability[]) {
@@ -414,9 +423,64 @@ function computeStandings(matches: any[], playerNames: string[]) {
     }
   });
 
-  return Object.values(stats)
-    .map((r: any) => ({ ...r, diff: r.pf - r.pa }))
-    .sort((a: any, b: any) => b.wins - a.wins || b.diff - a.diff || b.pf - a.pf || a.player.localeCompare(b.player));
+  const rows = Object.values(stats).map((r: any) => ({ ...r, diff: r.pf - r.pa }));
+
+  // Group players by wins so N-way ties are resolved as a group, not pairwise
+  const winGroups = new Map<number, any[]>();
+  rows.forEach((r) => {
+    const group = winGroups.get(r.wins) || [];
+    group.push(r);
+    winGroups.set(r.wins, group);
+  });
+
+  const result: any[] = [];
+  for (const wins of [...winGroups.keys()].sort((a, b) => b - a)) {
+    const group = winGroups.get(wins)!;
+
+    if (group.length === 1) {
+      result.push(...group);
+      continue;
+    }
+
+    // Compute mini-standings using only matches played among tied players
+    const groupNames = group.map((r: any) => r.player);
+    const groupMatches = matches.filter(
+      (m) =>
+        groupNames.includes(m.p1) &&
+        groupNames.includes(m.p2) &&
+        m.s1 !== "" && m.s2 !== ""
+    );
+
+    const mini = Object.fromEntries(groupNames.map((name) => [name, { wins: 0, diff: 0, pf: 0 }]));
+    groupMatches.forEach((m: any) => {
+      const s1 = Number(m.s1);
+      const s2 = Number(m.s2);
+      mini[m.p1].pf += s1;
+      mini[m.p1].diff += s1 - s2;
+      mini[m.p2].pf += s2;
+      mini[m.p2].diff += s2 - s1;
+      if (s1 > s2) mini[m.p1].wins += 1;
+      else if (s2 > s1) mini[m.p2].wins += 1;
+    });
+
+    // Coin flip assigned once per group so it's stable within a single sort
+    const coinFlip = Object.fromEntries(groupNames.map((name) => [name, Math.random()]));
+
+    result.push(
+      ...group.sort((a: any, b: any) => {
+        const ma = mini[a.player];
+        const mb = mini[b.player];
+        if (mb.wins !== ma.wins) return mb.wins - ma.wins;    // h2h wins in group
+        if (mb.diff !== ma.diff) return mb.diff - ma.diff;    // h2h point diff in group
+        if (mb.pf !== ma.pf) return mb.pf - ma.pf;           // h2h points in group
+        if (b.diff !== a.diff) return b.diff - a.diff;        // overall point diff
+        if (b.pf !== a.pf) return b.pf - a.pf;               // overall points
+        return coinFlip[a.player] - coinFlip[b.player];       // coin flip
+      })
+    );
+  }
+
+  return result;
 }
 
 function standingsByPool(matches: any[], players: PlayerWithAvailability[]) {
@@ -435,12 +499,21 @@ export default function AdminPage() {
   const [courtCount, setCourtCount] = useState(2);
   const [weekdayStart, setWeekdayStart] = useState("18:00");
   const [saturdayStart, setSaturdayStart] = useState("09:00");
+  const [tournamentName, setTournamentName] = useState("");
+  const [clubId, setClubId] = useState("");
+  const [playoffDate, setPlayoffDate] = useState("");
   const [players, setPlayers] = useState<PlayerWithAvailability[]>([]);
   const [poolDates, setPoolDates] = useState<PoolDate[]>([]);
   const [matches, setMatches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [workingId, setWorkingId] = useState<number | null>(null);
   const [message, setMessage] = useState("");
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [announcementForm, setAnnouncementForm] = useState({
+    title: "",
+    body: "",
+    priority: "info" as Announcement["priority"],
+  });
 
   const pendingPlayers = useMemo(
     () => players.filter((p) => p.status === "pending"),
@@ -511,6 +584,7 @@ export default function AdminPage() {
       setCourtCount(Number(settingsRow.court_count || 2));
       setWeekdayStart(settingsRow.weekday_start || "18:00");
       setSaturdayStart(settingsRow.saturday_start || "09:00");
+      setTournamentName(settingsRow.tournament_name || "");
     }
 
     const mappedPoolDates: PoolDate[] = (poolDateRows || []).map((row: any) => ({
@@ -534,8 +608,15 @@ export default function AdminPage() {
       waiverSigned: player.waiver_signed,
       status: player.status,
       availability: availabilityMap.get(player.id) || [],
+      duprId: (player as any).dupr_id || "",
     }));
 
+    const { data: announcementRows } = await supabase
+      .from("announcements")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    setAnnouncements((announcementRows as Announcement[]) || []);
     setPoolDates(mappedPoolDates);
     setPlayers(mergedPlayers);
     setMatches(matchRows || []);
@@ -740,6 +821,100 @@ const poolMatches = assignMatchesToAvailabilitySlots(
     await loadAdminData();
   }
 
+  async function postAnnouncement() {
+    if (!announcementForm.title.trim() || !announcementForm.body.trim()) {
+      setMessage("Title and message are required.");
+      return;
+    }
+
+    const { error } = await supabase.from("announcements").insert({
+      title: announcementForm.title.trim(),
+      body: announcementForm.body.trim(),
+      priority: announcementForm.priority,
+    });
+
+    if (error) {
+      setMessage(`Could not post announcement: ${error.message}`);
+      return;
+    }
+
+    setAnnouncementForm({ title: "", body: "", priority: "info" });
+    setMessage("Announcement posted.");
+    await loadAdminData();
+  }
+
+  async function deleteAnnouncement(id: number) {
+    const { error } = await supabase.from("announcements").delete().eq("id", id);
+    if (error) {
+      setMessage(`Could not delete announcement: ${error.message}`);
+      return;
+    }
+    setMessage("Announcement deleted.");
+    await loadAdminData();
+  }
+
+  async function toggleForfeit(id: number, forfeit: boolean) {
+    const { error } = await supabase
+      .from("matches")
+      .update({ forfeit, s1: forfeit ? null : undefined, s2: forfeit ? null : undefined, status: forfeit ? "forfeit" : "upcoming" })
+      .eq("id", id);
+
+    if (error) {
+      setMessage(`Forfeit update error: ${error.message}`);
+      return;
+    }
+
+    setMessage(forfeit ? "Match marked as forfeit." : "Forfeit cleared.");
+    await loadAdminData();
+  }
+
+  function exportDuprCsv() {
+    const playerMap = Object.fromEntries(players.map((p) => [p.name, p]));
+    const exportable = matches.filter(
+      (m) => !m.forfeit && m.s1 !== null && m.s1 !== "" && m.s2 !== null && m.s2 !== ""
+    );
+
+    if (!exportable.length) {
+      setMessage("No completed non-forfeit matches to export.");
+      return;
+    }
+
+    const rows = exportable.map((m) => {
+      const poolDate = poolDates.find((d) => d.id === m.slot_date_code);
+      const date = poolDate ? poolDate.date : playoffDate;
+      const p1 = playerMap[m.p1];
+      const p2 = playerMap[m.p2];
+      const eventName = `"${tournamentName.replace(/"/g, '""')}"`;
+      return [
+        "", "", "",                  // A, B, C blank
+        "S",                         // matchType
+        eventName,                   // event
+        date || "",                  // date YYYY-MM-DD
+        m.p1,                        // playerA1
+        p1?.duprId || "",            // playerA1DuprId
+        "",                          // playerA1ExternalId
+        "", "", "",                  // playerA2 (blank — singles)
+        m.p2,                        // playerB1
+        p2?.duprId || "",            // playerB1DuprId
+        "",                          // playerB1ExternalId
+        "", "", "",                  // playerB2 (blank — singles)
+        "",                          // column S blank
+        m.s1, m.s2,                  // Game 1
+        "", "", "", "", "", "", "", "", // Games 2–5 blank
+        clubId,                      // clubId
+      ].join(",");
+    });
+
+    const csv = rows.join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "dupr_export.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function renderAvailability(dateIds: string[]) {
     const labels = dateIds
       .map((id) => poolDates.find((d) => d.id === id))
@@ -866,6 +1041,82 @@ const poolMatches = assignMatchesToAvailabilitySlots(
 
         <Card className="rounded-3xl shadow-sm">
           <CardHeader>
+            <CardTitle>Announcements</CardTitle>
+            <CardDescription>Post updates visible to players on the public site.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="space-y-3 rounded-2xl border p-4">
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Title</label>
+                <input
+                  className="w-full rounded border px-3 py-2 text-sm"
+                  placeholder="Announcement title"
+                  value={announcementForm.title}
+                  onChange={(e) => setAnnouncementForm({ ...announcementForm, title: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Message</label>
+                <textarea
+                  className="w-full rounded border px-3 py-2 text-sm"
+                  rows={3}
+                  placeholder="Write your announcement..."
+                  value={announcementForm.body}
+                  onChange={(e) => setAnnouncementForm({ ...announcementForm, body: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Priority</label>
+                <select
+                  className="rounded border px-3 py-2 text-sm bg-white"
+                  value={announcementForm.priority}
+                  onChange={(e) => setAnnouncementForm({ ...announcementForm, priority: e.target.value as Announcement["priority"] })}
+                >
+                  <option value="info">Info</option>
+                  <option value="warning">Warning</option>
+                  <option value="important">Important</option>
+                </select>
+              </div>
+              <Button onClick={postAnnouncement}>Post Announcement</Button>
+            </div>
+
+            {announcements.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No announcements posted yet.</p>
+            ) : (
+              announcements.map((a) => (
+                <div key={a.id} className="rounded-2xl border bg-white p-4 shadow-sm space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold">{a.title}</span>
+                      <Badge variant={
+                        a.priority === "important" ? "destructive"
+                        : a.priority === "warning" ? "secondary"
+                        : "default"
+                      }>
+                        {a.priority}
+                      </Badge>
+                    </div>
+                    <button
+                      className="text-xs text-red-500 hover:underline"
+                      onClick={() => deleteAnnouncement(a.id)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{a.body}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(a.created_at).toLocaleDateString("en-US", {
+                      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
+                    })}
+                  </p>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-3xl shadow-sm">
+          <CardHeader>
             <CardTitle>Score Entry</CardTitle>
             <CardDescription>Update scores for saved matches.</CardDescription>
           </CardHeader>
@@ -886,24 +1137,75 @@ const poolMatches = assignMatchesToAvailabilitySlots(
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      className="w-20 rounded border px-2 py-1"
-                      value={match.s1 ?? ""}
-                      onChange={(e) => updateMatchScore(match.id, "s1", e.target.value)}
-                    />
-                    <span>to</span>
-                    <input
-                      type="number"
-                      className="w-20 rounded border px-2 py-1"
-                      value={match.s2 ?? ""}
-                      onChange={(e) => updateMatchScore(match.id, "s2", e.target.value)}
-                    />
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {match.forfeit ? (
+                      <span className="text-sm text-muted-foreground italic">Forfeit — not reported to DUPR</span>
+                    ) : (
+                      <>
+                        <input
+                          type="number"
+                          className="w-20 rounded border px-2 py-1"
+                          value={match.s1 ?? ""}
+                          onChange={(e) => updateMatchScore(match.id, "s1", e.target.value)}
+                        />
+                        <span>to</span>
+                        <input
+                          type="number"
+                          className="w-20 rounded border px-2 py-1"
+                          value={match.s2 ?? ""}
+                          onChange={(e) => updateMatchScore(match.id, "s2", e.target.value)}
+                        />
+                      </>
+                    )}
+                    <label className="flex items-center gap-1 text-sm text-muted-foreground cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!match.forfeit}
+                        onChange={(e) => toggleForfeit(match.id, e.target.checked)}
+                      />
+                      Forfeit
+                    </label>
                   </div>
                 </div>
               </div>
             ))}
+          </CardContent>
+        </Card>
+        <Card className="rounded-3xl shadow-sm">
+          <CardHeader>
+            <CardTitle>Export for DUPR</CardTitle>
+            <CardDescription>
+              Downloads a CSV of all completed, non-forfeit matches in the DUPR bulk import format.
+              Forfeit matches are excluded automatically.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-sm font-medium">DUPR Club ID</label>
+                <input
+                  className="w-full rounded border px-3 py-2 text-sm"
+                  placeholder="e.g. 123456789"
+                  value={clubId}
+                  onChange={(e) => setClubId(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">Found in your DUPR club settings.</p>
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Playoff / Bracket Day Date</label>
+                <input
+                  type="date"
+                  className="w-full rounded border px-3 py-2 text-sm"
+                  value={playoffDate}
+                  onChange={(e) => setPlayoffDate(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">Used for semifinal and final matches.</p>
+              </div>
+            </div>
+            <Button onClick={exportDuprCsv}>Download DUPR CSV</Button>
+            <p className="text-xs text-muted-foreground">
+              Pool play matches use their scheduled date automatically. After downloading, open in a spreadsheet editor to verify DUPR IDs before uploading.
+            </p>
           </CardContent>
         </Card>
       </div>
