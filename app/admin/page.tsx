@@ -508,6 +508,8 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [workingId, setWorkingId] = useState<number | null>(null);
   const [message, setMessage] = useState("");
+  const [scheduleLocked, setScheduleLocked] = useState(false);
+  const [showConfirmGenerate, setShowConfirmGenerate] = useState(false);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [announcementForm, setAnnouncementForm] = useState({
     title: "",
@@ -585,6 +587,7 @@ export default function AdminPage() {
       setWeekdayStart(settingsRow.weekday_start || "18:00");
       setSaturdayStart(settingsRow.saturday_start || "09:00");
       setTournamentName(settingsRow.tournament_name || "");
+      setScheduleLocked(!!settingsRow.schedule_locked);
     }
 
     const mappedPoolDates: PoolDate[] = (poolDateRows || []).map((row: any) => ({
@@ -705,6 +708,20 @@ function generateRawRoundRobinMatches(
 
   return matches;
 }
+  async function toggleScheduleLock() {
+    const newValue = !scheduleLocked;
+    const { error } = await supabase
+      .from("tournament_settings")
+      .update({ schedule_locked: newValue })
+      .neq("id", 0);
+    if (error) {
+      setMessage(`Could not update lock: ${error.message}`);
+      return;
+    }
+    setScheduleLocked(newValue);
+    setMessage(newValue ? "Schedule locked." : "Schedule unlocked.");
+  }
+
   async function generateSchedule() {
     setMessage("Generating schedule...");
 
@@ -963,9 +980,40 @@ const poolMatches = assignMatchesToAvailabilitySlots(
               <Badge>Approved: {approvedPlayers.length}</Badge>
             </div>
             {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
-            <div>
-              <Button onClick={generateSchedule}>Generate Schedule</Button>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                variant={scheduleLocked ? "secondary" : "outline"}
+                onClick={toggleScheduleLock}
+                className="gap-2"
+              >
+                {scheduleLocked ? "🔒 Schedule Locked — Click to Unlock" : "🔓 Lock Schedule"}
+              </Button>
+              <Button
+                onClick={() => setShowConfirmGenerate(true)}
+                disabled={scheduleLocked}
+                title={scheduleLocked ? "Unlock the schedule before regenerating" : undefined}
+              >
+                Generate Schedule
+              </Button>
             </div>
+            {showConfirmGenerate && (
+              <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 space-y-3">
+                <p className="text-sm font-semibold text-destructive">
+                  ⚠️ This will permanently delete all {matches.length} existing match{matches.length !== 1 ? "es" : ""} and regenerate the schedule from scratch. This cannot be undone.
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="destructive"
+                    onClick={() => { setShowConfirmGenerate(false); generateSchedule(); }}
+                  >
+                    Yes, regenerate
+                  </Button>
+                  <Button variant="outline" onClick={() => setShowConfirmGenerate(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
             {loading ? <p className="text-sm text-muted-foreground">Loading...</p> : null}
           </CardContent>
         </Card>
