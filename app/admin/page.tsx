@@ -1058,12 +1058,15 @@ const poolMatches = assignMatchesToAvailabilitySlots(
               <div className="space-y-1">
                 <label className="text-sm font-medium">Message</label>
                 <textarea
-                  className="w-full rounded border px-3 py-2 text-sm"
-                  rows={3}
-                  placeholder="Write your announcement..."
+                  className="w-full rounded border px-3 py-2 text-sm font-mono"
+                  rows={6}
+                  placeholder={"Write your announcement...\n\nFormatting tips:\n- Start a line with '- ' for bullets\n- Leave a blank line between paragraphs"}
                   value={announcementForm.body}
                   onChange={(e) => setAnnouncementForm({ ...announcementForm, body: e.target.value })}
                 />
+                <p className="text-xs text-muted-foreground">
+                  Use <code className="bg-muted px-1 rounded">- item</code> for bullets · blank line between paragraphs · paste a URL or use <code className="bg-muted px-1 rounded">[text](url)</code> for links
+                </p>
               </div>
               <div className="space-y-1">
                 <label className="text-sm font-medium">Priority</label>
