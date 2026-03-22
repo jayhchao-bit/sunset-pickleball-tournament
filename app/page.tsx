@@ -128,6 +128,45 @@ function getDisplayDayLabel(
 
   return match.dayLabel || "";
 }
+function renderInline(text: string): React.ReactNode {
+  const linkPattern = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)|https?:\/\/\S+/g;
+  const nodes: React.ReactNode[] = [];
+  let lastIndex = 0;
+  for (const match of text.matchAll(linkPattern)) {
+    if (match.index! > lastIndex) nodes.push(text.slice(lastIndex, match.index));
+    if (match[0].startsWith("[")) {
+      nodes.push(<a key={match.index} href={match[2]} target="_blank" rel="noopener noreferrer" className="underline text-primary">{match[1]}</a>);
+    } else {
+      nodes.push(<a key={match.index} href={match[0]} target="_blank" rel="noopener noreferrer" className="underline text-primary">{match[0]}</a>);
+    }
+    lastIndex = match.index! + match[0].length;
+  }
+  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+  return nodes.length ? nodes : text;
+}
+
+function renderBody(text: string): React.ReactNode {
+  const blocks = text.split(/\n\n+/);
+  return blocks.map((block, bi) => {
+    const lines = block.split("\n").filter((l) => l.trim());
+    const allBullets = lines.length > 0 && lines.every((l) => /^\s*[-*]\s/.test(l));
+    if (allBullets) {
+      return (
+        <ul key={bi} className="list-disc list-inside text-sm text-muted-foreground space-y-0.5">
+          {lines.map((l, li) => (
+            <li key={li}>{renderInline(l.replace(/^\s*[-*]\s+/, ""))}</li>
+          ))}
+        </ul>
+      );
+    }
+    return (
+      <p key={bi} className="text-sm text-muted-foreground">
+        {renderInline(block)}
+      </p>
+    );
+  });
+}
+
 function computeStandings(matches: any[], playerNames: string[]) {
   const stats = Object.fromEntries(
     playerNames.map((name) => [
@@ -622,7 +661,7 @@ const pools = useMemo(() => chunkIntoPools(players), [players]);
                 ) : (
                   announcements.map((a) => (
                     <div key={a.id} className="rounded-2xl border p-4 space-y-2">
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
                         <span className="font-semibold">{a.title}</span>
                         <div className="flex items-center gap-2 shrink-0">
                           <Badge variant={
@@ -639,7 +678,7 @@ const pools = useMemo(() => chunkIntoPools(players), [players]);
                           </span>
                         </div>
                       </div>
-                      <p className="text-sm text-muted-foreground">{a.body}</p>
+                      <div className="space-y-1">{renderBody(a.body)}</div>
                     </div>
                   ))
                 )}
