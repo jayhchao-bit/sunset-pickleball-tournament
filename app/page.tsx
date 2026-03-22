@@ -638,14 +638,16 @@ const pools = useMemo(() => chunkIntoPools(players), [players]);
         </div>
 
         <Tabs defaultValue="announcements" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-6 rounded-2xl">
-            <TabsTrigger value="announcements">Announcements</TabsTrigger>
-            <TabsTrigger value="register">Registration</TabsTrigger>
-            <TabsTrigger value="players">Players</TabsTrigger>
-            <TabsTrigger value="standings">Standings</TabsTrigger>
-            <TabsTrigger value="schedule">Schedule</TabsTrigger>
-            <TabsTrigger value="finals">Bracket</TabsTrigger>
-          </TabsList>
+          <div className="overflow-x-auto rounded-2xl">
+            <TabsList className="flex w-max min-w-full rounded-2xl h-auto flex-nowrap">
+              <TabsTrigger value="announcements" className="shrink-0">Announcements</TabsTrigger>
+              <TabsTrigger value="register" className="shrink-0">Registration</TabsTrigger>
+              <TabsTrigger value="players" className="shrink-0">Players</TabsTrigger>
+              <TabsTrigger value="standings" className="shrink-0">Standings</TabsTrigger>
+              <TabsTrigger value="schedule" className="shrink-0">Schedule</TabsTrigger>
+              <TabsTrigger value="finals" className="shrink-0">Bracket</TabsTrigger>
+            </TabsList>
+          </div>
 
           <TabsContent value="announcements" className="space-y-4">
             <Card className="rounded-3xl shadow-sm">
