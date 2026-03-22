@@ -387,6 +387,7 @@ export default function PickleballTournamentWebsite() {
         waiverSigned: player.waiver_signed,
         status: player.status,
         availability: availabilityMap.get(player.id) || [],
+        duprId: player.dupr_id || "",
       }));
 
       setPlayers(mergedPlayers);
@@ -786,6 +787,7 @@ const pools = useMemo(() => chunkIntoPools(players), [players]);
                     <TableHeader>
                       <TableRow>
                         <TableHead>Name</TableHead>
+                        <TableHead>DUPR ID</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Waiver</TableHead>
                       </TableRow>
@@ -795,6 +797,11 @@ const pools = useMemo(() => chunkIntoPools(players), [players]);
                         <TableRow key={player.id}>
                           <TableCell>
                             <div className="font-medium">{player.name}</div>
+                          </TableCell>
+                          <TableCell>
+                            <span className="font-mono text-sm text-muted-foreground">
+                              {player.duprId || <span className="italic">—</span>}
+                            </span>
                           </TableCell>
                           <TableCell>
                             <Badge variant={player.status === "approved" ? "default" : "secondary"}>
