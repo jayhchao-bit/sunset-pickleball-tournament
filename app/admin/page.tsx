@@ -1074,13 +1074,27 @@ const poolMatches = assignMatchesToAvailabilitySlots(
 
             {approvedPlayers.map((player) => (
               <div key={player.id} className="rounded-2xl border bg-white p-4 shadow-sm">
-                <div className="space-y-1">
-                  <div className="text-lg font-semibold">{player.name}</div>
-                  <div className="text-sm text-muted-foreground">{player.email}</div>
-                  <div className="text-sm text-muted-foreground">Skill: {player.skill}</div>
-                  <div className="text-sm text-muted-foreground">
-                    Availability: {renderAvailability(player.availability)}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="space-y-1">
+                    <div className="text-lg font-semibold">{player.name}</div>
+                    <div className="text-sm text-muted-foreground">{player.email}</div>
+                    <div className="text-sm text-muted-foreground">Skill: {player.skill}</div>
+                    <div className="text-sm text-muted-foreground">
+                      Availability: {renderAvailability(player.availability)}
+                    </div>
                   </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0"
+                    onClick={() => {
+                      const url = `${window.location.origin}/?tab=schedule&player=${encodeURIComponent(player.name)}`;
+                      navigator.clipboard.writeText(url);
+                      setMessage(`Copied schedule link for ${player.name}`);
+                    }}
+                  >
+                    🔗 Copy Schedule Link
+                  </Button>
                 </div>
               </div>
             ))}
