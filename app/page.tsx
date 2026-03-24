@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Label } from "@/components/ui/label";
-import { Trophy, Medal, UserPlus, CalendarDays, ListChecks, Megaphone } from "lucide-react";
+import { Trophy, Medal, UserPlus, CalendarDays, ListChecks, Megaphone, Link2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 type Announcement = {
@@ -328,7 +328,25 @@ export default function PickleballTournamentWebsite() {
   });
   const [message, setMessage] = useState("");
   const [selectedPlayer, setSelectedPlayer] = useState("all");
+  const [activeTab, setActiveTab] = useState("announcements");
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+
+  // Read URL params on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab");
+    const player = params.get("player");
+    if (tab) setActiveTab(tab);
+    if (player) setSelectedPlayer(player);
+  }, []);
+
+  // Sync URL when tab or player changes
+  const updateUrl = useCallback((tab: string, player: string) => {
+    const params = new URLSearchParams();
+    params.set("tab", tab);
+    if (player && player !== "all") params.set("player", player);
+    window.history.replaceState({}, "", `?${params.toString()}`);
+  }, []);
   const loadPublicData = useCallback(async () => {
     const { data: settingsData } = await supabase
       .from("tournament_settings")
@@ -638,7 +656,7 @@ const pools = useMemo(() => chunkIntoPools(players), [players]);
           </Card>
         </div>
 
-        <Tabs defaultValue="announcements" className="space-y-4">
+        <Tabs value={activeTab} onValueChange={(tab) => { setActiveTab(tab); updateUrl(tab, selectedPlayer); }} className="space-y-4">
           <div className="overflow-x-auto rounded-2xl">
             <TabsList className="flex w-max min-w-full rounded-2xl h-auto flex-nowrap">
               <TabsTrigger value="announcements" className="shrink-0">Announcements</TabsTrigger>
@@ -857,7 +875,7 @@ const pools = useMemo(() => chunkIntoPools(players), [players]);
       id="player-filter"
       className="rounded-md border px-3 py-2 bg-white"
       value={selectedPlayer}
-      onChange={(e) => setSelectedPlayer(e.target.value)}
+      onChange={(e) => { setSelectedPlayer(e.target.value); updateUrl(activeTab, e.target.value); }}
     >
       <option value="all">All players</option>
       {approvedPlayers.map((player) => (
