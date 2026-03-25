@@ -870,6 +870,23 @@ const poolMatches = assignMatchesToAvailabilitySlots(
     await loadAdminData();
   }
 
+  async function incrementScore(id: number, field: "s1" | "s2", delta: number) {
+    const m = matches.find((x) => x.id === id);
+    if (!m) return;
+    const next = Math.max(0, (m[field] ?? 0) + delta);
+    setMatches((prev) => prev.map((x) => x.id === id ? { ...x, [field]: next, status: "in_progress" } : x));
+    const { error } = await supabase.from("matches").update({ [field]: next, status: "in_progress" }).eq("id", id);
+    if (error) { setMessage(error.message); await loadAdminData(); }
+  }
+
+  async function setMatchStatus(id: number, status: string, clearScores = false) {
+    const update: Record<string, unknown> = { status };
+    if (clearScores) { update.s1 = null; update.s2 = null; }
+    setMatches((prev) => prev.map((m) => m.id === id ? { ...m, ...update } : m));
+    const { error } = await supabase.from("matches").update(update).eq("id", id);
+    if (error) { setMessage(error.message); await loadAdminData(); }
+  }
+
   async function toggleForfeit(id: number, forfeit: boolean) {
     const { error } = await supabase
       .from("matches")
@@ -1205,6 +1222,30 @@ const poolMatches = assignMatchesToAvailabilitySlots(
                   <div className="flex items-center gap-3 flex-wrap">
                     {match.forfeit ? (
                       <span className="text-sm text-muted-foreground italic">Forfeit — not reported to DUPR</span>
+                    ) : match.status === "in_progress" ? (
+                      <>
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs text-muted-foreground w-20 truncate text-right">{match.p1}</span>
+                          <Button size="sm" variant="outline" onClick={() => incrementScore(match.id, "s1", -1)}>−</Button>
+                          <span className="w-8 text-center font-bold text-lg">{match.s1 ?? 0}</span>
+                          <Button size="sm" onClick={() => incrementScore(match.id, "s1", 1)}>+</Button>
+                        </div>
+                        <span className="font-bold text-muted-foreground">vs</span>
+                        <div className="flex items-center gap-1">
+                          <Button size="sm" variant="outline" onClick={() => incrementScore(match.id, "s2", -1)}>−</Button>
+                          <span className="w-8 text-center font-bold text-lg">{match.s2 ?? 0}</span>
+                          <Button size="sm" onClick={() => incrementScore(match.id, "s2", 1)}>+</Button>
+                          <span className="text-xs text-muted-foreground w-20 truncate">{match.p2}</span>
+                        </div>
+                        <Button size="sm" onClick={() => setMatchStatus(match.id, "final")}>✓ Final</Button>
+                        <Button size="sm" variant="ghost" onClick={() => setMatchStatus(match.id, "upcoming", true)}>Reset</Button>
+                      </>
+                    ) : match.status === "final" ? (
+                      <>
+                        <span className="font-semibold">{match.s1} – {match.s2}</span>
+                        <Button size="sm" variant="ghost" onClick={() => setMatchStatus(match.id, "upcoming", true)}>↩ Reopen</Button>
+                        <Button size="sm" variant="outline" onClick={() => setMatchStatus(match.id, "in_progress")}>▶ Go Live</Button>
+                      </>
                     ) : (
                       <>
                         <input
@@ -1220,6 +1261,7 @@ const poolMatches = assignMatchesToAvailabilitySlots(
                           value={match.s2 ?? ""}
                           onChange={(e) => updateMatchScore(match.id, "s2", e.target.value)}
                         />
+                        <Button size="sm" variant="outline" onClick={() => setMatchStatus(match.id, "in_progress")}>▶ Go Live</Button>
                       </>
                     )}
                     <label className="flex items-center gap-1 text-sm text-muted-foreground cursor-pointer">
