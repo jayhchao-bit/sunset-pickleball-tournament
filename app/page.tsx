@@ -913,9 +913,15 @@ const pools = useMemo(() => chunkIntoPools(players), [players]);
 </TableCell>
                           <TableCell>{m.stage === "pool" ? (m.preferredSlot ? "Preferred" : "Fallback") : "Playoff"}</TableCell>
                           <TableCell>
-                            <Badge variant={m.s1 !== "" && m.s2 !== "" ? "default" : "secondary"}>
-                              {m.s1 !== "" && m.s2 !== "" ? `${m.s1}-${m.s2}` : "Upcoming"}
-                            </Badge>
+                            {m.status === "in_progress" ? (
+                              <Badge variant="destructive" className="animate-pulse">
+                                🔴 LIVE {m.s1 ?? 0}–{m.s2 ?? 0}
+                              </Badge>
+                            ) : m.s1 !== "" && m.s2 !== "" ? (
+                              <Badge variant="default">{m.s1}–{m.s2}</Badge>
+                            ) : (
+                              <Badge variant="secondary">Upcoming</Badge>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
