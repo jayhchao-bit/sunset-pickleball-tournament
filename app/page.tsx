@@ -267,7 +267,7 @@ function standingsByPool(matches: any[], players: any[]) {
   };
 }
 
-function StatTable({ rows, title }: { rows: any[]; title: string }) {
+function StatTable({ rows, title, onPlayerClick }: { rows: any[]; title: string; onPlayerClick?: (player: string) => void }) {
   return (
     <Card className="rounded-2xl shadow-sm">
       <CardHeader>
@@ -292,7 +292,16 @@ function StatTable({ rows, title }: { rows: any[]; title: string }) {
             {rows.map((row, idx) => (
               <TableRow key={row.player}>
                 <TableCell>{idx + 1}</TableCell>
-                <TableCell className="font-medium">{row.player}</TableCell>
+                <TableCell className="font-medium">
+                  {onPlayerClick ? (
+                    <button
+                      className="text-left underline text-blue-600 hover:text-blue-800 transition-colors cursor-pointer"
+                      onClick={() => onPlayerClick(row.player)}
+                    >
+                      {row.player}
+                    </button>
+                  ) : row.player}
+                </TableCell>
                 <TableCell>{row.wins}</TableCell>
                 <TableCell>{row.losses}</TableCell>
                 <TableCell>{row.pf}</TableCell>
@@ -979,8 +988,8 @@ const pools = useMemo(() => chunkIntoPools(players), [players]);
 
           <TabsContent value="standings" className="space-y-4">
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <StatTable rows={standings.A} title="Pool A Standings" />
-              <StatTable rows={standings.B} title="Pool B Standings" />
+              <StatTable rows={standings.A} title="Pool A Standings" onPlayerClick={(p) => { setSelectedPlayer(p); setActiveTab("schedule"); updateUrl("schedule", p); }} />
+              <StatTable rows={standings.B} title="Pool B Standings" onPlayerClick={(p) => { setSelectedPlayer(p); setActiveTab("schedule"); updateUrl("schedule", p); }} />
             </div>
           </TabsContent>
 
