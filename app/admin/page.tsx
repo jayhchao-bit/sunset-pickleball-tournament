@@ -336,7 +336,12 @@ function generatePlayoffMatches(standings: any, saturdayStart = "09:00", courtCo
 
   const semi1Start = saturdayStart;
   const semi2Start = courtCount > 1 ? saturdayStart : addMinutes(saturdayStart, 60);
-  const finalStart = courtCount > 1 ? addMinutes(saturdayStart, 60) : addMinutes(semi2Start, 60);
+  // Round 2 starts 60 min after semis finish
+  const roundTwoStart = courtCount > 1 ? addMinutes(saturdayStart, 60) : addMinutes(semi2Start, 60);
+  // 2 courts: bronze & final run in parallel; 1 court: bronze first, final last
+  const bronzeStart = roundTwoStart;
+  const finalStart = courtCount > 1 ? roundTwoStart : addMinutes(roundTwoStart, 60);
+  const bronzeCourt = courtCount > 1 ? 2 : 1;
 
   return [
     {
@@ -370,6 +375,23 @@ function generatePlayoffMatches(standings: any, saturdayStart = "09:00", courtCo
       slotDateCode: "playoff",
       startTime: semi2Start,
       endTime: addMinutes(semi2Start, 50),
+      preferredSlot: true,
+      format: "Best 2 of 3 to 11",
+    },
+    {
+      pool: "Playoff",
+      stage: "bronze",
+      round: 2,
+      court: bronzeCourt,
+      p1: "Loser Semi 1",
+      p2: "Loser Semi 2",
+      s1: null,
+      s2: null,
+      status: "upcoming",
+      dayLabel: "Saturday Bracket Play",
+      slotDateCode: "playoff",
+      startTime: bronzeStart,
+      endTime: addMinutes(bronzeStart, 50),
       preferredSlot: true,
       format: "Best 2 of 3 to 11",
     },
@@ -492,6 +514,30 @@ function standingsByPool(matches: any[], players: PlayerWithAvailability[]) {
   };
 }
 
+function getPlayoffMatchResult(match: any): { winner: "p1" | "p2" | null; p1Games: number; p2Games: number } {
+  let p1Games = 0;
+  let p2Games = 0;
+  // Only count a game as won once it has been explicitly finalized (or match already complete)
+  const alreadyFinal = match?.status === "final";
+  const g1done = match?.g1_final || alreadyFinal;
+  const g2done = match?.g2_final || alreadyFinal;
+  if (g1done && match?.s1 != null && match?.s2 != null) {
+    if (Number(match.s1) > Number(match.s2)) p1Games++;
+    else if (Number(match.s2) > Number(match.s1)) p2Games++;
+  }
+  if (g2done && match?.g2_p1 != null && match?.g2_p2 != null) {
+    if (Number(match.g2_p1) > Number(match.g2_p2)) p1Games++;
+    else if (Number(match.g2_p2) > Number(match.g2_p1)) p2Games++;
+  }
+  if (g1done && g2done && match?.g3_p1 != null && match?.g3_p2 != null) {
+    if (Number(match.g3_p1) > Number(match.g3_p2)) p1Games++;
+    else if (Number(match.g3_p2) > Number(match.g3_p1)) p2Games++;
+  }
+  if (p1Games > p2Games) return { winner: "p1", p1Games, p2Games };
+  if (p2Games > p1Games) return { winner: "p2", p1Games, p2Games };
+  return { winner: null, p1Games, p2Games };
+}
+
 export default function AdminPage() {
   const [adminAuthenticated, setAdminAuthenticated] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
@@ -510,6 +556,8 @@ export default function AdminPage() {
   const [message, setMessage] = useState("");
   const [scheduleLocked, setScheduleLocked] = useState(false);
   const [showConfirmGenerate, setShowConfirmGenerate] = useState(false);
+  const [showConfirmFinalize, setShowConfirmFinalize] = useState(false);
+  const [showConfirmFinalizeChampionship, setShowConfirmFinalizeChampionship] = useState(false);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [announcementForm, setAnnouncementForm] = useState({
     title: "",
@@ -805,6 +853,105 @@ const poolMatches = assignMatchesToAvailabilitySlots(
     await loadAdminData();
   }
 
+  async function finalizeBracketSeeds() {
+    const standings = standingsByPool(matches, players);
+    const a1 = standings.A[0]?.player || "Pool A #1";
+    const a2 = standings.A[1]?.player || "Pool A #2";
+    const b1 = standings.B[0]?.player || "Pool B #1";
+    const b2 = standings.B[1]?.player || "Pool B #2";
+
+    // Semis are inserted in order: Semi 1 (A1 vs B2), then Semi 2 (B1 vs A2)
+    const semis = matches.filter((m) => m.stage === "semifinal").sort((a, b) => a.id - b.id);
+    if (semis.length !== 2) {
+      setMessage("Expected 2 semifinal matches. Generate a schedule first.");
+      return;
+    }
+
+    const [semi1, semi2] = semis;
+    const results = await Promise.all([
+      supabase.from("matches").update({ p1: a1, p2: b2 }).eq("id", semi1.id),
+      supabase.from("matches").update({ p1: b1, p2: a2 }).eq("id", semi2.id),
+    ]);
+
+    const err = results.find((r) => r.error);
+    if (err) {
+      setMessage(`Error updating bracket: ${err.error!.message}`);
+      return;
+    }
+
+    setShowConfirmFinalize(false);
+    setMessage("Bracket seeds finalized.");
+    await loadAdminData();
+  }
+
+  async function finalizeChampionshipSeeds() {
+    const semis = matches.filter((m) => m.stage === "semifinal").sort((a, b) => a.id - b.id);
+    if (semis.length !== 2) {
+      setMessage("Expected 2 semifinal matches.");
+      return;
+    }
+    if (semis.some((s) => s.status !== "final" && s.status !== "forfeit")) {
+      setMessage("Both semifinals must be complete before finalizing championship seeds.");
+      return;
+    }
+
+    const [semi1, semi2] = semis;
+    const r1 = getPlayoffMatchResult(semi1);
+    if (!r1.winner) {
+      setMessage("Semifinal 1 has no winner yet. Make sure both games are finalized.");
+      return;
+    }
+    const s1Winner = r1.winner === "p1" ? semi1.p1 : semi1.p2;
+    const s1Loser  = r1.winner === "p1" ? semi1.p2 : semi1.p1;
+    const r2 = getPlayoffMatchResult(semi2);
+    if (!r2.winner) {
+      setMessage("Semifinal 2 has no winner yet. Make sure both games are finalized.");
+      return;
+    }
+    const s2Winner = r2.winner === "p1" ? semi2.p1 : semi2.p2;
+    const s2Loser  = r2.winner === "p1" ? semi2.p2 : semi2.p1;
+
+    let finalMatch  = matches.find((m) => m.stage === "final");
+    let bronzeMatch = matches.find((m) => m.stage === "bronze");
+
+    // If final/bronze rows don't exist yet, create them
+    if (!finalMatch) {
+      const { data, error } = await supabase.from("matches").insert({
+        pool: "Playoff", stage: "final", round: 2, court: 1,
+        p1: s1Winner, p2: s2Winner,
+        s1: null, s2: null, status: "upcoming",
+        day_label: "Championship", format: "Best 2 of 3 to 11",
+      }).select().single();
+      if (error) { setMessage(`Error creating final match: ${error.message}`); return; }
+      finalMatch = data;
+    }
+    if (!bronzeMatch) {
+      const { data, error } = await supabase.from("matches").insert({
+        pool: "Playoff", stage: "bronze", round: 2, court: 2,
+        p1: s1Loser, p2: s2Loser,
+        s1: null, s2: null, status: "upcoming",
+        day_label: "Championship", format: "Best 2 of 3 to 11",
+      }).select().single();
+      if (error) { setMessage(`Error creating bronze match: ${error.message}`); return; }
+      bronzeMatch = data;
+    }
+
+    const results = await Promise.all([
+      supabase.from("matches").update({ p1: s1Winner, p2: s2Winner }).eq("id", finalMatch.id),
+      supabase.from("matches").update({ p1: s1Loser,  p2: s2Loser  }).eq("id", bronzeMatch.id),
+    ]);
+
+    const err = results.find((r) => r.error);
+    if (err) {
+      setMessage(`Error updating championship seeds: ${err.error!.message}`);
+      return;
+    }
+
+    setShowConfirmFinalizeChampionship(false);
+    setMessage("Championship seeds finalized.");
+    await loadAdminData();
+  }
+
   async function updateMatchScore(id: number, key: "s1" | "s2", value: string) {
     const { data: existingMatch, error: fetchError } = await supabase
       .from("matches")
@@ -870,18 +1017,64 @@ const poolMatches = assignMatchesToAvailabilitySlots(
     await loadAdminData();
   }
 
-  async function incrementScore(id: number, field: "s1" | "s2", delta: number) {
+  async function incrementScore(id: number, field: string, delta: number) {
     const m = matches.find((x) => x.id === id);
     if (!m) return;
+    if (!(field in m)) {
+      setMessage("Run the SQL migration first: ALTER TABLE matches ADD COLUMN IF NOT EXISTS g2_p1 integer; (and g2_p2, g3_p1, g3_p2)");
+      return;
+    }
     const next = Math.max(0, (m[field] ?? 0) + delta);
-    setMatches((prev) => prev.map((x) => x.id === id ? { ...x, [field]: next, status: "in_progress" } : x));
-    const { error } = await supabase.from("matches").update({ [field]: next, status: "in_progress" }).eq("id", id);
+    setMatches((prev) => prev.map((x) => x.id === id ? { ...x, [field]: next } : x));
+    const { error } = await supabase.from("matches").update({ [field]: next }).eq("id", id);
+    if (error) { setMessage(error.message); await loadAdminData(); }
+  }
+
+  async function finalizeGame(id: number, game: 1 | 2 | 3) {
+    const m = matches.find((x) => x.id === id);
+    if (!m) return;
+    if (!("g1_final" in m)) {
+      setMessage("Run the SQL migration: ALTER TABLE matches ADD COLUMN IF NOT EXISTS g1_final boolean DEFAULT false; (and g2_final)");
+      return;
+    }
+    if (game === 1) {
+      const update = { g1_final: true };
+      setMatches((prev) => prev.map((x) => x.id === id ? { ...x, ...update } : x));
+      const { error } = await supabase.from("matches").update(update).eq("id", id);
+      if (error) { setMessage(error.message); await loadAdminData(); }
+    } else if (game === 2) {
+      const updatedMatch = { ...m, g2_final: true };
+      const result = getPlayoffMatchResult(updatedMatch);
+      const matchOver = result.p1Games >= 2 || result.p2Games >= 2;
+      const update: Record<string, unknown> = { g2_final: true };
+      if (matchOver) update.status = "final";
+      setMatches((prev) => prev.map((x) => x.id === id ? { ...x, ...update } : x));
+      const { error } = await supabase.from("matches").update(update).eq("id", id);
+      if (error) { setMessage(error.message); await loadAdminData(); }
+    } else {
+      const update = { status: "final" };
+      setMatches((prev) => prev.map((x) => x.id === id ? { ...x, ...update } : x));
+      const { error } = await supabase.from("matches").update(update).eq("id", id);
+      if (error) { setMessage(error.message); await loadAdminData(); }
+    }
+  }
+
+  async function saveMatchField(id: number, field: string, value: string) {
+    const val = value === "" ? null : Number(value);
+    setMatches((prev) => prev.map((x) => x.id === id ? { ...x, [field]: val } : x));
+    const { error } = await supabase.from("matches").update({ [field]: val }).eq("id", id);
     if (error) { setMessage(error.message); await loadAdminData(); }
   }
 
   async function setMatchStatus(id: number, status: string, clearScores = false) {
     const update: Record<string, unknown> = { status };
-    if (clearScores) { update.s1 = null; update.s2 = null; }
+    if (clearScores) {
+      update.s1 = null;
+      update.s2 = null;
+      const m = matches.find((x) => x.id === id);
+      if (m && "g2_p1" in m) { update.g2_p1 = null; update.g2_p2 = null; update.g3_p1 = null; update.g3_p2 = null; }
+      if (m && "g1_final" in m) { update.g1_final = false; update.g2_final = false; }
+    }
     setMatches((prev) => prev.map((m) => m.id === id ? { ...m, ...update } : m));
     const { error } = await supabase.from("matches").update(update).eq("id", id);
     if (error) { setMessage(error.message); await loadAdminData(); }
@@ -933,8 +1126,11 @@ const poolMatches = assignMatchesToAvailabilitySlots(
         "",                          // playerB1ExternalId
         "", "", "",                  // playerB2 (blank — singles)
         "",                          // column S blank
-        m.s1, m.s2,                  // Game 1
-        "", "", "", "", "", "", "", "", // Games 2–5 blank
+        m.s1 ?? "", m.s2 ?? "",                        // Game 1
+        m.g2_p1 ?? "", m.g2_p2 ?? "",                  // Game 2
+        m.g3_p1 ?? "", m.g3_p2 ?? "",                  // Game 3
+        "", "",                                         // Game 4 blank
+        "", "",                                         // Game 5 blank
         clubId,                      // clubId
       ].join(",");
     });
@@ -980,6 +1176,22 @@ const poolMatches = assignMatchesToAvailabilitySlots(
       </div>
     );
   }
+
+  const poolMatches = matches.filter((m) => m.stage === "pool");
+  const poolMatchesDone = poolMatches.filter((m) => m.status === "final" || m.status === "forfeit").length;
+  const semiFinalMatches = matches.filter((m) => m.stage === "semifinal").sort((a, b) => a.id - b.id);
+  const semisComplete = semiFinalMatches.length === 2 && semiFinalMatches.every((s) => s.status === "final" || s.status === "forfeit");
+  const finalMatch = matches.find((m) => m.stage === "final");
+  const bronzeMatch = matches.find((m) => m.stage === "bronze");
+  const projectedSeeds = (() => {
+    const s = standingsByPool(matches, players);
+    return {
+      a1: s.A[0]?.player || "Pool A #1",
+      a2: s.A[1]?.player || "Pool A #2",
+      b1: s.B[0]?.player || "Pool B #1",
+      b2: s.B[1]?.player || "Pool B #2",
+    };
+  })();
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8">
@@ -1029,6 +1241,76 @@ const poolMatches = assignMatchesToAvailabilitySlots(
                     Cancel
                   </Button>
                 </div>
+              </div>
+            )}
+            {semiFinalMatches.length > 0 && (
+              <div className="rounded-lg border p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold">Bracket Seeds</p>
+                    <p className="text-xs text-muted-foreground">
+                      Pool play: {poolMatchesDone} / {poolMatches.length} complete
+                      {poolMatchesDone === poolMatches.length && poolMatches.length > 0 ? " ✓ All done" : ""}
+                    </p>
+                  </div>
+                  <Button variant="outline" onClick={() => setShowConfirmFinalize(true)}>
+                    Finalize Bracket Seeds
+                  </Button>
+                </div>
+                <div className="text-sm text-muted-foreground space-y-1">
+                  <div>Semi 1: <span className="font-medium text-foreground">{projectedSeeds.a1}</span> vs <span className="font-medium text-foreground">{projectedSeeds.b2}</span></div>
+                  <div>Semi 2: <span className="font-medium text-foreground">{projectedSeeds.b1}</span> vs <span className="font-medium text-foreground">{projectedSeeds.a2}</span></div>
+                  <div className="text-xs">Currently in DB — Semi 1: {semiFinalMatches[0]?.p1} vs {semiFinalMatches[0]?.p2} · Semi 2: {semiFinalMatches[1]?.p1} vs {semiFinalMatches[1]?.p2}</div>
+                </div>
+                {showConfirmFinalize && (
+                  <div className="rounded border border-amber-300 bg-amber-50 p-3 space-y-2">
+                    <p className="text-sm font-semibold">Update bracket match records with these seeds?</p>
+                    <p className="text-xs text-muted-foreground">This only updates the player names in the semifinal matches. Pool scores are not affected.</p>
+                    <div className="flex gap-2">
+                      <Button onClick={finalizeBracketSeeds}>Yes, finalize</Button>
+                      <Button variant="outline" onClick={() => setShowConfirmFinalize(false)}>Cancel</Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {semisComplete && (finalMatch || bronzeMatch) && (
+              <div className="rounded-lg border p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold">Championship Seeds</p>
+                    <p className="text-xs text-muted-foreground">Both semifinals are complete — set the final & bronze matchups.</p>
+                  </div>
+                  <Button variant="outline" onClick={() => setShowConfirmFinalizeChampionship(true)}>
+                    Finalize Final & Bronze
+                  </Button>
+                </div>
+                {(() => {
+                  const [s1, s2] = semiFinalMatches;
+                  const r1 = s1 ? getPlayoffMatchResult(s1) : null;
+                  const r2 = s2 ? getPlayoffMatchResult(s2) : null;
+                  const s1Winner = r1 ? (r1.winner === "p1" ? s1!.p1 : s1!.p2) : "?";
+                  const s1Loser  = r1 ? (r1.winner === "p1" ? s1!.p2 : s1!.p1) : "?";
+                  const s2Winner = r2 ? (r2.winner === "p1" ? s2!.p1 : s2!.p2) : "?";
+                  const s2Loser  = r2 ? (r2.winner === "p1" ? s2!.p2 : s2!.p1) : "?";
+                  return (
+                    <div className="text-sm text-muted-foreground space-y-1">
+                      <div>🥇 Final: <span className="font-medium text-foreground">{s1Winner}</span> vs <span className="font-medium text-foreground">{s2Winner}</span></div>
+                      <div>🥉 Bronze: <span className="font-medium text-foreground">{s1Loser}</span> vs <span className="font-medium text-foreground">{s2Loser}</span></div>
+                      <div className="text-xs">Currently in DB — Final: {finalMatch?.p1} vs {finalMatch?.p2} · Bronze: {bronzeMatch?.p1} vs {bronzeMatch?.p2}</div>
+                    </div>
+                  );
+                })()}
+                {showConfirmFinalizeChampionship && (
+                  <div className="rounded border border-amber-300 bg-amber-50 p-3 space-y-2">
+                    <p className="text-sm font-semibold">Update final and bronze match records with these players?</p>
+                    <p className="text-xs text-muted-foreground">Pool and semifinal scores are not affected.</p>
+                    <div className="flex gap-2">
+                      <Button onClick={finalizeChampionshipSeeds}>Yes, finalize</Button>
+                      <Button variant="outline" onClick={() => setShowConfirmFinalizeChampionship(false)}>Cancel</Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             {loading ? <p className="text-sm text-muted-foreground">Loading...</p> : null}
@@ -1223,29 +1505,129 @@ const poolMatches = assignMatchesToAvailabilitySlots(
                     {match.forfeit ? (
                       <span className="text-sm text-muted-foreground italic">Forfeit — not reported to DUPR</span>
                     ) : match.status === "in_progress" ? (
-                      <>
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs text-muted-foreground w-20 truncate text-right">{match.p1}</span>
-                          <Button size="sm" variant="outline" onClick={() => incrementScore(match.id, "s1", -1)}>−</Button>
-                          <span className="w-8 text-center font-bold text-lg">{match.s1 ?? 0}</span>
-                          <Button size="sm" onClick={() => incrementScore(match.id, "s1", 1)}>+</Button>
-                        </div>
-                        <span className="font-bold text-muted-foreground">vs</span>
-                        <div className="flex items-center gap-1">
-                          <Button size="sm" variant="outline" onClick={() => incrementScore(match.id, "s2", -1)}>−</Button>
-                          <span className="w-8 text-center font-bold text-lg">{match.s2 ?? 0}</span>
-                          <Button size="sm" onClick={() => incrementScore(match.id, "s2", 1)}>+</Button>
-                          <span className="text-xs text-muted-foreground w-20 truncate">{match.p2}</span>
-                        </div>
-                        <Button size="sm" onClick={() => setMatchStatus(match.id, "final")}>✓ Final</Button>
-                        <Button size="sm" variant="ghost" onClick={() => setMatchStatus(match.id, "upcoming", true)}>Reset</Button>
-                      </>
+                      match.stage !== "pool" ? (() => {
+                        const g2en = match.g1_final === true;
+                        const g3en = (() => {
+                          if (!match.g2_final) return false;
+                          let p1 = 0, p2 = 0;
+                          if (match.g1_final && match.s1 != null && match.s2 != null && Number(match.s1) !== Number(match.s2)) {
+                            if (Number(match.s1) > Number(match.s2)) p1++; else p2++;
+                          }
+                          if (match.g2_final && match.g2_p1 != null && match.g2_p2 != null && Number(match.g2_p1) !== Number(match.g2_p2)) {
+                            if (Number(match.g2_p1) > Number(match.g2_p2)) p1++; else p2++;
+                          }
+                          return p1 === 1 && p2 === 1;
+                        })();
+                        return (
+                          <div className="w-full space-y-1">
+                            {/* Column headers with finalize buttons */}
+                            <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] gap-x-3 text-xs text-muted-foreground text-center">
+                              <div />
+                              <div className="w-28 flex items-center justify-center gap-1">
+                                {match.g1_final ? <span className="text-green-600 font-semibold">G1 ✓</span> : <>G1 <Button size="sm" variant="outline" className="h-5 px-1.5 text-xs ml-1" onClick={() => finalizeGame(match.id, 1)}>✓ Done</Button></>}
+                              </div>
+                              <div className={`w-28 flex items-center justify-center gap-1 ${!g2en ? "opacity-30" : ""}`}>
+                                {match.g2_final ? <span className="text-green-600 font-semibold">G2 ✓</span> : <>G2 {g2en && <Button size="sm" variant="outline" className="h-5 px-1.5 text-xs ml-1" onClick={() => finalizeGame(match.id, 2)}>✓ Done</Button>}</>}
+                              </div>
+                              <div className={`w-28 flex items-center justify-center gap-1 ${!g3en ? "opacity-30" : ""}`}>
+                                G3 {g3en && match.g3_p1 !== null && match.g3_p2 !== null && <Button size="sm" variant="outline" className="h-5 px-1.5 text-xs ml-1" onClick={() => finalizeGame(match.id, 3)}>✓ Match</Button>}
+                              </div>
+                            </div>
+                            {/* P1 row */}
+                            <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-x-3">
+                              <span className="text-xs truncate text-muted-foreground">{match.p1}</span>
+                              <div className="flex items-center gap-0.5 w-28 justify-center">
+                                <Button size="sm" variant="outline" onClick={() => incrementScore(match.id, "s1", -1)}>−</Button>
+                                <span className="w-7 text-center font-bold text-sm">{match.s1 ?? 0}</span>
+                                <Button size="sm" onClick={() => incrementScore(match.id, "s1", 1)}>+</Button>
+                              </div>
+                              <div className={`flex items-center gap-0.5 w-28 justify-center ${!g2en ? "opacity-30 pointer-events-none" : ""}`}>
+                                <Button size="sm" variant="outline" onClick={() => incrementScore(match.id, "g2_p1", -1)}>−</Button>
+                                <span className="w-7 text-center font-bold text-sm">{match.g2_p1 ?? 0}</span>
+                                <Button size="sm" onClick={() => incrementScore(match.id, "g2_p1", 1)}>+</Button>
+                              </div>
+                              <div className={`flex items-center gap-0.5 w-28 justify-center ${!g3en ? "opacity-30 pointer-events-none" : ""}`}>
+                                <Button size="sm" variant="outline" onClick={() => incrementScore(match.id, "g3_p1", -1)}>−</Button>
+                                <span className="w-7 text-center font-bold text-sm">{match.g3_p1 ?? 0}</span>
+                                <Button size="sm" onClick={() => incrementScore(match.id, "g3_p1", 1)}>+</Button>
+                              </div>
+                            </div>
+                            {/* P2 row */}
+                            <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-x-3">
+                              <span className="text-xs truncate text-muted-foreground">{match.p2}</span>
+                              <div className="flex items-center gap-0.5 w-28 justify-center">
+                                <Button size="sm" variant="outline" onClick={() => incrementScore(match.id, "s2", -1)}>−</Button>
+                                <span className="w-7 text-center font-bold text-sm">{match.s2 ?? 0}</span>
+                                <Button size="sm" onClick={() => incrementScore(match.id, "s2", 1)}>+</Button>
+                              </div>
+                              <div className={`flex items-center gap-0.5 w-28 justify-center ${!g2en ? "opacity-30 pointer-events-none" : ""}`}>
+                                <Button size="sm" variant="outline" onClick={() => incrementScore(match.id, "g2_p2", -1)}>−</Button>
+                                <span className="w-7 text-center font-bold text-sm">{match.g2_p2 ?? 0}</span>
+                                <Button size="sm" onClick={() => incrementScore(match.id, "g2_p2", 1)}>+</Button>
+                              </div>
+                              <div className={`flex items-center gap-0.5 w-28 justify-center ${!g3en ? "opacity-30 pointer-events-none" : ""}`}>
+                                <Button size="sm" variant="outline" onClick={() => incrementScore(match.id, "g3_p2", -1)}>−</Button>
+                                <span className="w-7 text-center font-bold text-sm">{match.g3_p2 ?? 0}</span>
+                                <Button size="sm" onClick={() => incrementScore(match.id, "g3_p2", 1)}>+</Button>
+                              </div>
+                            </div>
+                            <Button size="sm" variant="ghost" className="mt-1" onClick={() => setMatchStatus(match.id, "upcoming", true)}>Reset</Button>
+                          </div>
+                        );
+                      })() : (
+                        <>
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs text-muted-foreground w-20 truncate text-right">{match.p1}</span>
+                            <Button size="sm" variant="outline" onClick={() => incrementScore(match.id, "s1", -1)}>−</Button>
+                            <span className="w-8 text-center font-bold text-lg">{match.s1 ?? 0}</span>
+                            <Button size="sm" onClick={() => incrementScore(match.id, "s1", 1)}>+</Button>
+                          </div>
+                          <span className="font-bold text-muted-foreground">vs</span>
+                          <div className="flex items-center gap-1">
+                            <Button size="sm" variant="outline" onClick={() => incrementScore(match.id, "s2", -1)}>−</Button>
+                            <span className="w-8 text-center font-bold text-lg">{match.s2 ?? 0}</span>
+                            <Button size="sm" onClick={() => incrementScore(match.id, "s2", 1)}>+</Button>
+                            <span className="text-xs text-muted-foreground w-20 truncate">{match.p2}</span>
+                          </div>
+                          <Button size="sm" onClick={() => setMatchStatus(match.id, "final")}>✓ Final</Button>
+                          <Button size="sm" variant="ghost" onClick={() => setMatchStatus(match.id, "upcoming", true)}>Reset</Button>
+                        </>
+                      )
                     ) : match.status === "final" ? (
                       <>
-                        <span className="font-semibold">{match.s1} – {match.s2}</span>
+                        {match.stage !== "pool" ? (
+                          <span className="font-semibold text-sm">
+                            {[
+                              match.s1 != null ? `${match.s1}–${match.s2}` : null,
+                              match.g2_p1 != null ? `${match.g2_p1}–${match.g2_p2}` : null,
+                              match.g3_p1 != null ? `${match.g3_p1}–${match.g3_p2}` : null,
+                            ].filter(Boolean).join(", ")}
+                          </span>
+                        ) : (
+                          <span className="font-semibold">{match.s1} – {match.s2}</span>
+                        )}
                         <Button size="sm" variant="ghost" onClick={() => setMatchStatus(match.id, "upcoming", true)}>↩ Reopen</Button>
                         <Button size="sm" variant="outline" onClick={() => setMatchStatus(match.id, "in_progress")}>▶ Go Live</Button>
                       </>
+                    ) : match.stage !== "pool" ? (
+                      <div className="w-full space-y-1">
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] gap-x-3 text-xs text-muted-foreground text-center">
+                          <div /><div className="w-24">G1</div><div className="w-24">G2</div><div className="w-24">G3</div>
+                        </div>
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-x-3">
+                          <span className="text-xs truncate text-muted-foreground">{match.p1}</span>
+                          <input type="number" className="w-24 rounded border px-2 py-1 text-sm text-center" value={match.s1 ?? ""} onChange={(e) => saveMatchField(match.id, "s1", e.target.value)} />
+                          <input type="number" className="w-24 rounded border px-2 py-1 text-sm text-center" value={match.g2_p1 ?? ""} onChange={(e) => saveMatchField(match.id, "g2_p1", e.target.value)} />
+                          <input type="number" className="w-24 rounded border px-2 py-1 text-sm text-center" value={match.g3_p1 ?? ""} onChange={(e) => saveMatchField(match.id, "g3_p1", e.target.value)} />
+                        </div>
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-x-3">
+                          <span className="text-xs truncate text-muted-foreground">{match.p2}</span>
+                          <input type="number" className="w-24 rounded border px-2 py-1 text-sm text-center" value={match.s2 ?? ""} onChange={(e) => saveMatchField(match.id, "s2", e.target.value)} />
+                          <input type="number" className="w-24 rounded border px-2 py-1 text-sm text-center" value={match.g2_p2 ?? ""} onChange={(e) => saveMatchField(match.id, "g2_p2", e.target.value)} />
+                          <input type="number" className="w-24 rounded border px-2 py-1 text-sm text-center" value={match.g3_p2 ?? ""} onChange={(e) => saveMatchField(match.id, "g3_p2", e.target.value)} />
+                        </div>
+                        <Button size="sm" variant="outline" onClick={() => setMatchStatus(match.id, "in_progress")}>▶ Go Live</Button>
+                      </div>
                     ) : (
                       <>
                         <input

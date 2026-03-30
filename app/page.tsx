@@ -69,7 +69,8 @@ function addMinutes(timeString: string, minutesToAdd: number) {
   return `${String(nextHours).padStart(2, "0")}:${String(nextMinutes).padStart(2, "0")}`;
 }
 
-function formatTime(timeString: string) {
+function formatTime(timeString: string | null | undefined) {
+  if (!timeString) return "";
   const [hours, minutes] = timeString.split(":").map(Number);
   const suffix = hours >= 12 ? "PM" : "AM";
   const displayHour = hours % 12 === 0 ? 12 : hours % 12;
@@ -306,6 +307,103 @@ function StatTable({ rows, title }: { rows: any[]; title: string }) {
   );
 }
 
+function getPlayoffMatchResult(match: any): { winner: "p1" | "p2" | null; p1Games: number; p2Games: number } {
+  let p1Games = 0;
+  let p2Games = 0;
+  const alreadyFinal = match?.status === "final";
+  const g1done = match?.g1_final || alreadyFinal;
+  const g2done = match?.g2_final || alreadyFinal;
+  if (g1done && match?.s1 != null && match?.s2 != null) {
+    if (Number(match.s1) > Number(match.s2)) p1Games++;
+    else if (Number(match.s2) > Number(match.s1)) p2Games++;
+  }
+  if (g2done && match?.g2_p1 != null && match?.g2_p2 != null) {
+    if (Number(match.g2_p1) > Number(match.g2_p2)) p1Games++;
+    else if (Number(match.g2_p2) > Number(match.g2_p1)) p2Games++;
+  }
+  if (g1done && g2done && match?.g3_p1 != null && match?.g3_p2 != null) {
+    if (Number(match.g3_p1) > Number(match.g3_p2)) p1Games++;
+    else if (Number(match.g3_p2) > Number(match.g3_p1)) p2Games++;
+  }
+  if (p1Games > p2Games) return { winner: "p1", p1Games, p2Games };
+  if (p2Games > p1Games) return { winner: "p2", p1Games, p2Games };
+  return { winner: null, p1Games, p2Games };
+}
+
+function BracketCard({ match, label, gold = false, bronze = false }: { match: any; label: string; gold?: boolean; bronze?: boolean }) {
+  const result = getPlayoffMatchResult(match);
+  const isDone = match?.status === "final";
+  const isLive = match?.status === "in_progress";
+  const p1wins = result.winner === "p1";
+  const p2wins = result.winner === "p2";
+
+  const headerCls = gold
+    ? "bg-amber-50 text-amber-700 border-b border-amber-200"
+    : bronze
+    ? "bg-orange-50 text-orange-700 border-b border-orange-200"
+    : "bg-slate-50 text-slate-500 border-b border-slate-100";
+
+  const borderCls = gold
+    ? "border-amber-300 shadow-amber-100"
+    : bronze
+    ? "border-orange-300 shadow-orange-100"
+    : "border-slate-200";
+
+  const hasScores = match?.s1 != null;
+
+  return (
+    <div className={`rounded-xl border overflow-hidden shadow-sm ${borderCls}`}>
+      <div className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wide flex items-center justify-between ${headerCls}`}>
+        <span>{label}</span>
+        {isLive && <span className="text-green-600 font-medium normal-case animate-pulse">● LIVE</span>}
+        {isDone && <span className="text-xs font-semibold normal-case tracking-wider px-1.5 py-0.5 rounded bg-slate-700 text-white">FINAL</span>}
+      </div>
+      <div className="bg-white px-3 py-2">
+        {hasScores && (
+          <div className="grid grid-cols-[1fr_2rem_2rem_2rem_auto] text-xs text-center text-slate-400 pb-1">
+            <div />
+            <div>G1</div>
+            <div className={match?.g2_p1 != null ? "" : "text-slate-200"}>G2</div>
+            <div className={match?.g3_p1 != null ? "" : "text-slate-200"}>G3</div>
+            <div />
+          </div>
+        )}
+        <div className={`grid ${hasScores ? "grid-cols-[1fr_2rem_2rem_2rem_auto]" : "grid-cols-[1fr_auto]"} items-center py-1.5 ${p1wins && isDone ? "rounded bg-green-100" : p1wins ? "rounded bg-green-50/60" : ""}`}>
+          <span className={`text-sm truncate ${p1wins ? "font-bold text-slate-900" : p2wins ? "text-slate-400" : "text-slate-700"}`}>
+            {match?.p1 || "TBD"}
+          </span>
+          {hasScores && (
+            <>
+              <span className={`text-sm tabular-nums text-center ${Number(match.s1) > Number(match.s2) ? "font-bold text-slate-900" : "text-slate-500"}`}>{match.s1}</span>
+              <span className={`text-sm tabular-nums text-center ${match?.g2_p1 == null ? "text-slate-200" : Number(match.g2_p1) > Number(match.g2_p2) ? "font-bold text-slate-900" : "text-slate-500"}`}>{match?.g2_p1 ?? "–"}</span>
+              <span className={`text-sm tabular-nums text-center ${match?.g3_p1 == null ? "text-slate-200" : Number(match.g3_p1) > Number(match.g3_p2) ? "font-bold text-slate-900" : "text-slate-500"}`}>{match?.g3_p1 ?? "–"}</span>
+            </>
+          )}
+          <span className={`w-2 h-2 rounded-full justify-self-end ${p1wins ? "bg-green-500" : "bg-transparent"}`} />
+        </div>
+        <div className={`grid ${hasScores ? "grid-cols-[1fr_2rem_2rem_2rem_auto]" : "grid-cols-[1fr_auto]"} items-center py-1.5 ${p2wins && isDone ? "rounded bg-green-100" : p2wins ? "rounded bg-green-50/60" : ""}`}>
+          <span className={`text-sm truncate ${p2wins ? "font-bold text-slate-900" : p1wins ? "text-slate-400" : "text-slate-700"}`}>
+            {match?.p2 || "TBD"}
+          </span>
+          {hasScores && (
+            <>
+              <span className={`text-sm tabular-nums text-center ${Number(match.s2) > Number(match.s1) ? "font-bold text-slate-900" : "text-slate-500"}`}>{match.s2}</span>
+              <span className={`text-sm tabular-nums text-center ${match?.g2_p2 == null ? "text-slate-200" : Number(match.g2_p2) > Number(match.g2_p1) ? "font-bold text-slate-900" : "text-slate-500"}`}>{match?.g2_p2 ?? "–"}</span>
+              <span className={`text-sm tabular-nums text-center ${match?.g3_p2 == null ? "text-slate-200" : Number(match.g3_p2) > Number(match.g3_p1) ? "font-bold text-slate-900" : "text-slate-500"}`}>{match?.g3_p2 ?? "–"}</span>
+            </>
+          )}
+          <span className={`w-2 h-2 rounded-full justify-self-end ${p2wins ? "bg-green-500" : "bg-transparent"}`} />
+        </div>
+      </div>
+      {(match?.start_time || match?.court) && (
+        <div className="px-3 py-1 bg-slate-50 border-t border-slate-100 text-xs text-slate-400">
+          {match.start_time ? `${formatTime(match.start_time)} · ` : ""}Court {match.court}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PickleballTournamentWebsite() {
   const [tournamentName, setTournamentName] = useState("Inaugural Sunset Men's Singles Pickleball Classic");
   const [eventDate, setEventDate] = useState("Bracket Play: April 11, 2026 at 9:00 AM");
@@ -438,6 +536,12 @@ export default function PickleballTournamentWebsite() {
         p2: m.p2,
         s1: m.s1 ?? "",
         s2: m.s2 ?? "",
+        g2_p1: m.g2_p1 ?? null,
+        g2_p2: m.g2_p2 ?? null,
+        g3_p1: m.g3_p1 ?? null,
+        g3_p2: m.g3_p2 ?? null,
+        g1_final: m.g1_final ?? false,
+        g2_final: m.g2_final ?? false,
         status: m.status,
         dayLabel: m.day_label,
         slotDateId: m.slot_date_code,
@@ -537,17 +641,38 @@ const completed = matches.filter((m) => m.s1 !== "" && m.s2 !== "").length;
 const upcoming = matches.length - completed;
 const pools = useMemo(() => chunkIntoPools(players), [players]);
 
-  const finalists = useMemo(() => {
+  const bracketData = useMemo(() => {
+    const semis = matches.filter((m) => m.stage === "semifinal").sort((a, b) => a.id - b.id);
+    const finalMatch  = matches.find((m) => m.stage === "final");
+    const bronzeMatch = matches.find((m) => m.stage === "bronze");
+
+    // Projected seeds from current standings (shown when DB not yet finalized)
     const a1 = standings.A[0]?.player || "TBD";
     const a2 = standings.A[1]?.player || "TBD";
     const b1 = standings.B[0]?.player || "TBD";
     const b2 = standings.B[1]?.player || "TBD";
+
+    const semi1 = semis[0] ?? { p1: a1, p2: b2, s1: null, s2: null, status: "upcoming", court: 1, start_time: null };
+    const semi2 = semis[1] ?? { p1: b1, p2: a2, s1: null, s2: null, status: "upcoming", court: 2, start_time: null };
+
+    // Determine winners/losers from scored semis for display fallback
+    const semi1Done = semi1.status === "final" && semi1.s1 !== null && semi1.s2 !== null;
+    const semi2Done = semi2.status === "final" && semi2.s1 !== null && semi2.s2 !== null;
+    const r1 = semi1Done ? getPlayoffMatchResult(semi1) : null;
+    const r2 = semi2Done ? getPlayoffMatchResult(semi2) : null;
+    const s1Winner = r1 ? (r1.winner === "p1" ? semi1.p1 : semi1.p2) : "Winner Semi 1";
+    const s1Loser  = r1 ? (r1.winner === "p1" ? semi1.p2 : semi1.p1) : "Loser Semi 1";
+    const s2Winner = r2 ? (r2.winner === "p1" ? semi2.p1 : semi2.p2) : "Winner Semi 2";
+    const s2Loser  = r2 ? (r2.winner === "p1" ? semi2.p2 : semi2.p1) : "Loser Semi 2";
+
     return {
-      semi1: `${a1} vs ${b2}`,
-      semi2: `${b1} vs ${a2}`,
-      final: "Winner Semi 1 vs Winner Semi 2",
+      semi1,
+      semi2,
+      final:  finalMatch  ?? { p1: s1Winner, p2: s2Winner, s1: null, s2: null, status: "upcoming", court: 1, start_time: null },
+      bronze: bronzeMatch ?? { p1: s1Loser,  p2: s2Loser,  s1: null, s2: null, status: "upcoming", court: 2, start_time: null },
+      isProjected: !semis.length,
     };
-  }, [standings]);
+  }, [matches, standings]);
 
   const handleRegister = async () => {
     if (!registrationOpen) {
@@ -932,51 +1057,56 @@ const pools = useMemo(() => chunkIntoPools(players), [players]);
             </div>
           </TabsContent>
 
-          <TabsContent value="finals" className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-              <Card className="rounded-3xl shadow-sm lg:col-span-2">
-                <CardHeader>
-                  <CardTitle className="text-lg">Projected Bracket</CardTitle>
-                  <CardDescription>Top 2 players from each pool advance. Semifinals and final are best 2 of 3.</CardDescription>
-                </CardHeader>
-                <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                  <div className="rounded-2xl border p-4">
-                    <div className="text-sm text-muted-foreground">Semifinal 1</div>
-                    <div className="mt-2 text-xl font-semibold">{finalists.semi1}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">{formatTime(saturdayStart)} • Court 1 • Best 2 of 3</div>
-                  </div>
-                  <div className="rounded-2xl border p-4">
-                    <div className="text-sm text-muted-foreground">Semifinal 2</div>
-                    <div className="mt-2 text-xl font-semibold">{finalists.semi2}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {Number(courtCount) > 1
-                        ? formatTime(saturdayStart)
-                        : formatTime(addMinutes(saturdayStart, PLAYOFF_MATCH_MINUTES + PLAYOFF_BUFFER_MINUTES))} • Court {Number(courtCount) > 1 ? 2 : 1} • Best 2 of 3
-                    </div>
-                  </div>
-                  <div className="rounded-2xl border p-4">
-                    <div className="text-sm text-muted-foreground">Final</div>
-                    <div className="mt-2 text-xl font-semibold">{finalists.final}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {Number(courtCount) > 1
-                        ? formatTime(addMinutes(saturdayStart, PLAYOFF_MATCH_MINUTES + PLAYOFF_BUFFER_MINUTES))
-                        : formatTime(addMinutes(saturdayStart, 2 * (PLAYOFF_MATCH_MINUTES + PLAYOFF_BUFFER_MINUTES)))} • Court 1 • Best 2 of 3
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+          <TabsContent value="finals" className="space-y-6">
+            {/* Header */}
+            <div className="text-center space-y-1">
+              <h2 className="text-2xl font-bold tracking-tight">Tournament Bracket</h2>
+              <p className="text-sm text-muted-foreground">
+                Top 2 from each pool advance · Best 2 of 3 to 11
+                {bracketData.isProjected && " · Projected based on current standings"}
+              </p>
+            </div>
 
-              <Card className="rounded-3xl shadow-sm">
-                <CardHeader>
-                  <CardTitle className="text-lg">Tournament Info</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3 text-sm text-muted-foreground">
-                  <p>Public page is view-only.</p>
-                  <p>Registrations are saved to Supabase.</p>
-                  <p>Schedule and scores are managed from the admin page.</p>
-                  <p>Players can return anytime to check standings, schedule, and bracket.</p>
-                </CardContent>
-              </Card>
+            {/* Bracket tree — scrollable on small screens */}
+            <div className="overflow-x-auto -mx-2 px-2">
+              <div className="min-w-[520px]">
+                {/* Round labels */}
+                <div className="grid grid-cols-[1fr_3rem_1fr] mb-3 text-center">
+                  <div className="text-xs font-bold uppercase tracking-widest text-slate-400">Semifinals</div>
+                  <div />
+                  <div className="text-xs font-bold uppercase tracking-widest text-slate-400">Finals</div>
+                </div>
+
+                {/* Bracket */}
+                <div className="grid grid-cols-[1fr_3rem_1fr] items-stretch">
+                  {/* Left column: Semis */}
+                  <div className="flex flex-col gap-4">
+                    <BracketCard match={bracketData.semi1} label="Semifinal 1" />
+                    <BracketCard match={bracketData.semi2} label="Semifinal 2" />
+                  </div>
+
+                  {/* Connector lines */}
+                  <div className="flex flex-col">
+                    <div className="flex-1 border-r-2 border-b-2 border-slate-200 rounded-br-xl" />
+                    <div className="flex-1 border-r-2 border-t-2 border-slate-200 rounded-tr-xl" />
+                  </div>
+
+                  {/* Right column: Final (centered) + Bronze (bottom) */}
+                  <div className="flex flex-col justify-between gap-4">
+                    <div className="flex-1 flex flex-col justify-center">
+                      <div className="flex items-center gap-0">
+                        <div className="h-px w-4 bg-slate-200 shrink-0" />
+                        <div className="flex-1">
+                          <BracketCard match={bracketData.final} label="🥇 Championship Final" gold />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex-1 flex flex-col justify-center">
+                      <BracketCard match={bracketData.bronze} label="🥉 Bronze Medal" bronze />
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </TabsContent>
         </Tabs>
