@@ -28,6 +28,13 @@ type Announcement = {
   created_at: string;
 };
 
+type Prize = {
+  id: number;
+  place: string;
+  amount: string;
+  sort_order: number;
+};
+
 type PoolDate = {
   id: string;
   label: string;
@@ -564,6 +571,8 @@ export default function AdminPage() {
     body: "",
     priority: "info" as Announcement["priority"],
   });
+  const [prizes, setPrizes] = useState<Prize[]>([]);
+  const [prizeForm, setPrizeForm] = useState({ place: "", amount: "", sort_order: "0" });
 
   const pendingPlayers = useMemo(
     () => players.filter((p) => p.status === "pending"),
@@ -667,7 +676,13 @@ export default function AdminPage() {
       .select("*")
       .order("created_at", { ascending: false });
 
+    const { data: prizeRows } = await supabase
+      .from("prizes")
+      .select("*")
+      .order("sort_order", { ascending: true });
+
     setAnnouncements((announcementRows as Announcement[]) || []);
+    setPrizes((prizeRows as Prize[]) || []);
     setPoolDates(mappedPoolDates);
     setPlayers(mergedPlayers);
     setMatches(matchRows || []);
@@ -982,6 +997,29 @@ const poolMatches = assignMatchesToAvailabilitySlots(
     }
 
     setMessage("Score updated.");
+    await loadAdminData();
+  }
+
+  async function addPrize() {
+    if (!prizeForm.place.trim() || !prizeForm.amount.trim()) {
+      setMessage("Place and amount are required.");
+      return;
+    }
+    const { error } = await supabase.from("prizes").insert({
+      place: prizeForm.place.trim(),
+      amount: prizeForm.amount.trim(),
+      sort_order: Number(prizeForm.sort_order) || 0,
+    });
+    if (error) { setMessage(`Could not add prize: ${error.message}`); return; }
+    setPrizeForm({ place: "", amount: "", sort_order: "0" });
+    setMessage("Prize added.");
+    await loadAdminData();
+  }
+
+  async function deletePrize(id: number) {
+    const { error } = await supabase.from("prizes").delete().eq("id", id);
+    if (error) { setMessage(`Could not delete prize: ${error.message}`); return; }
+    setMessage("Prize deleted.");
     await loadAdminData();
   }
 
@@ -1397,6 +1435,63 @@ const poolMatches = assignMatchesToAvailabilitySlots(
                 </div>
               </div>
             ))}
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-3xl shadow-sm">
+          <CardHeader>
+            <CardTitle>Prize Money</CardTitle>
+            <CardDescription>Manage prize payouts displayed on the public site.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-3 rounded-2xl border p-4">
+              <div className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Place</label>
+                  <input
+                    className="w-full rounded border px-3 py-2 text-sm"
+                    placeholder="e.g. 1st Place"
+                    value={prizeForm.place}
+                    onChange={(e) => setPrizeForm({ ...prizeForm, place: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Amount / Prize</label>
+                  <input
+                    className="w-full rounded border px-3 py-2 text-sm"
+                    placeholder="e.g. $500"
+                    value={prizeForm.amount}
+                    onChange={(e) => setPrizeForm({ ...prizeForm, amount: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Order</label>
+                  <input
+                    className="w-full rounded border px-3 py-2 text-sm w-16"
+                    type="number"
+                    value={prizeForm.sort_order}
+                    onChange={(e) => setPrizeForm({ ...prizeForm, sort_order: e.target.value })}
+                  />
+                </div>
+              </div>
+              <Button onClick={addPrize}>Add Prize</Button>
+            </div>
+            {prizes.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No prizes added yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {prizes.map((p) => (
+                  <div key={p.id} className="flex items-center justify-between rounded-xl border bg-white px-4 py-2.5">
+                    <div>
+                      <span className="font-semibold">{p.place}</span>
+                      <span className="mx-2 text-muted-foreground">—</span>
+                      <span>{p.amount}</span>
+                    </div>
+                    <button className="text-xs text-red-500 hover:underline" onClick={() => deletePrize(p.id)}>Delete</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 

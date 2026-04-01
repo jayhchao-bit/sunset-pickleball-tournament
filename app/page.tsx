@@ -19,6 +19,13 @@ type Announcement = {
   created_at: string;
 };
 
+type Prize = {
+  id: number;
+  place: string;
+  amount: string;
+  sort_order: number;
+};
+
 const MAX_PLAYERS = 10;
 const PLAYOFF_MATCH_MINUTES = 50;
 const PLAYOFF_BUFFER_MINUTES = 10;
@@ -437,6 +444,7 @@ export default function PickleballTournamentWebsite() {
   const [selectedPlayer, setSelectedPlayer] = useState("all");
   const [activeTab, setActiveTab] = useState("announcements");
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [prizes, setPrizes] = useState<Prize[]>([]);
 
   // Read URL params on mount
   useEffect(() => {
@@ -532,7 +540,13 @@ export default function PickleballTournamentWebsite() {
       .select("*")
       .order("created_at", { ascending: false });
 
+    const { data: prizeRows } = await supabase
+      .from("prizes")
+      .select("*")
+      .order("sort_order", { ascending: true });
+
     setAnnouncements((announcementRows as Announcement[]) || []);
+    setPrizes((prizeRows as Prize[]) || []);
 
     if (matchRows && matchRows.length) {
       const mappedMatches = matchRows.map((m: any) => ({
@@ -803,6 +817,25 @@ const pools = useMemo(() => chunkIntoPools(players), [players]);
           </div>
 
           <TabsContent value="announcements" className="space-y-4">
+            {prizes.length > 0 && (
+              <Card className="rounded-3xl shadow-sm">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Trophy className="h-5 w-5 text-amber-500" /> Prize Money
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="divide-y">
+                    {prizes.map((p) => (
+                      <div key={p.id} className="flex items-center justify-between py-2.5">
+                        <span className="font-medium">{p.place}</span>
+                        <span className="text-green-700 font-semibold">{p.amount}</span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
             <Card className="rounded-3xl shadow-sm">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg">
