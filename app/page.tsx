@@ -184,9 +184,24 @@ function computeStandings(matches: any[], playerNames: string[]) {
   );
 
   matches.forEach((m) => {
+    if (!playerNames.includes(m.p1) || !playerNames.includes(m.p2)) return;
+
+    // Forfeit: count as W/L with no points
+    if (m.forfeit && m.forfeit_loser) {
+      stats[m.p1].played += 1;
+      stats[m.p2].played += 1;
+      if (m.forfeit_loser === "p1") {
+        stats[m.p1].losses += 1;
+        stats[m.p2].wins += 1;
+      } else if (m.forfeit_loser === "p2") {
+        stats[m.p2].losses += 1;
+        stats[m.p1].wins += 1;
+      }
+      return;
+    }
+
     const s1 = Number(m.s1);
     const s2 = Number(m.s2);
-    if (!playerNames.includes(m.p1) || !playerNames.includes(m.p2)) return;
     if (!Number.isFinite(s1) || !Number.isFinite(s2) || m.s1 === "" || m.s2 === "") return;
 
     stats[m.p1].played += 1;
@@ -572,6 +587,8 @@ export default function PickleballTournamentWebsite() {
         endTime: m.end_time,
         preferredSlot: m.preferred_slot,
         format: m.format,
+        forfeit: m.forfeit ?? false,
+        forfeit_loser: m.forfeit_loser ?? null,
       }));
       setMatches(mappedMatches);
     } else {
@@ -1080,7 +1097,9 @@ const pools = useMemo(() => chunkIntoPools(players), [players]);
 </TableCell>
                           <TableCell>{m.stage === "pool" ? (m.preferredSlot ? "Preferred" : "Fallback") : "Playoff"}</TableCell>
                           <TableCell>
-                            {m.status === "in_progress" ? (
+                            {m.forfeit ? (
+                              <Badge variant="default" className="bg-gray-500 text-white">Forfeit</Badge>
+                            ) : m.status === "in_progress" ? (
                               <Badge variant="destructive" className="animate-pulse">
                                 🔴 LIVE {m.s1 ?? 0}–{m.s2 ?? 0}
                               </Badge>

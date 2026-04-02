@@ -1118,10 +1118,17 @@ const poolMatches = assignMatchesToAvailabilitySlots(
     if (error) { setMessage(error.message); await loadAdminData(); }
   }
 
-  async function toggleForfeit(id: number, forfeit: boolean) {
+  async function setForfeit(id: number, forfeitLoser: "p1" | "p2" | null) {
+    const isForfeit = forfeitLoser !== null;
     const { error } = await supabase
       .from("matches")
-      .update({ forfeit, s1: forfeit ? null : undefined, s2: forfeit ? null : undefined, status: forfeit ? "forfeit" : "upcoming" })
+      .update({
+        forfeit: isForfeit,
+        forfeit_loser: forfeitLoser,
+        s1: isForfeit ? null : undefined,
+        s2: isForfeit ? null : undefined,
+        status: isForfeit ? "forfeit" : "upcoming",
+      })
       .eq("id", id);
 
     if (error) {
@@ -1129,7 +1136,7 @@ const poolMatches = assignMatchesToAvailabilitySlots(
       return;
     }
 
-    setMessage(forfeit ? "Match marked as forfeit." : "Forfeit cleared.");
+    setMessage(isForfeit ? "Match marked as forfeit." : "Forfeit cleared.");
     await loadAdminData();
   }
 
@@ -1598,7 +1605,9 @@ const poolMatches = assignMatchesToAvailabilitySlots(
 
                   <div className="flex items-center gap-3 flex-wrap">
                     {match.forfeit ? (
-                      <span className="text-sm text-muted-foreground italic">Forfeit — not reported to DUPR</span>
+                      <span className="text-sm text-muted-foreground italic">
+                        {match.forfeit_loser === "p1" ? match.p1 : match.forfeit_loser === "p2" ? match.p2 : "Someone"} forfeited — not reported to DUPR
+                      </span>
                     ) : match.status === "in_progress" ? (
                       match.stage !== "pool" ? (() => {
                         const g2en = match.g1_final === true;
@@ -1741,14 +1750,18 @@ const poolMatches = assignMatchesToAvailabilitySlots(
                         <Button size="sm" variant="outline" onClick={() => setMatchStatus(match.id, "in_progress")}>▶ Go Live</Button>
                       </>
                     )}
-                    <label className="flex items-center gap-1 text-sm text-muted-foreground cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={!!match.forfeit}
-                        onChange={(e) => toggleForfeit(match.id, e.target.checked)}
-                      />
-                      Forfeit
-                    </label>
+                    <select
+                      className="text-sm rounded border px-2 py-1 text-muted-foreground"
+                      value={match.forfeit ? (match.forfeit_loser ?? "") : ""}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setForfeit(match.id, val === "p1" || val === "p2" ? val : null);
+                      }}
+                    >
+                      <option value="">No Forfeit</option>
+                      <option value="p1">{match.p1} forfeits</option>
+                      <option value="p2">{match.p2} forfeits</option>
+                    </select>
                   </div>
                 </div>
               </div>
