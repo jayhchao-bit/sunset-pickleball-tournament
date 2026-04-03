@@ -1151,6 +1151,8 @@ const poolMatches = assignMatchesToAvailabilitySlots(
       return;
     }
 
+    const header = ",,,matchType,event,date,playerA1,playerA1DuprId,playerA1ExternalId,playerA2,playerA2DuprId,playerA2ExternalId,playerB1,playerB1DuprId,playerB1ExternalId,playerB2,playerB2DuprId,playerB2ExternalId,,teamAGame1,teamBGame1,teamAGame2,teamBGame2,teamAGame3,teamBGame3,teamAGame4,teamBGame4,teamAGame5,teamBGame5,clubId,scoreType";
+
     const rows = exportable.map((m) => {
       const poolDate = poolDates.find((d) => d.id === m.slot_date_code);
       const date = poolDate ? poolDate.date : playoffDate;
@@ -1177,10 +1179,11 @@ const poolMatches = assignMatchesToAvailabilitySlots(
         "", "",                                         // Game 4 blank
         "", "",                                         // Game 5 blank
         clubId,                      // clubId
+        "",                          // scoreType (leave blank — optional)
       ].join(",");
     });
 
-    const csv = rows.join("\n");
+    const csv = [header, ...rows].join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
