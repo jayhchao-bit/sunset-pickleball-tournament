@@ -1133,9 +1133,9 @@ const pools = useMemo(() => chunkIntoPools(players), [players]);
               <div className="min-w-[520px]">
                 {/* Round labels */}
                 <div className="grid grid-cols-[1fr_3rem_1fr] mb-3 text-center">
-                  <div className="text-xs font-bold uppercase tracking-widest text-slate-400">Semifinals</div>
+                  <div className="text-xs font-bold uppercase tracking-widest text-slate-400">The Final Four</div>
                   <div />
-                  <div className="text-xs font-bold uppercase tracking-widest text-slate-400">Finals</div>
+                  <div className="text-xs font-bold uppercase tracking-widest text-slate-400">The Championship</div>
                 </div>
 
                 {/* Bracket */}
