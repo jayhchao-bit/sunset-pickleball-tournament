@@ -1140,17 +1140,13 @@ const poolMatches = assignMatchesToAvailabilitySlots(
     await loadAdminData();
   }
 
-  function exportDuprCsv() {
-    const playerMap = Object.fromEntries(players.map((p) => [p.name, p]));
-    const exportable = matches.filter(
-      (m) => !m.forfeit && m.s1 !== null && m.s1 !== "" && m.s2 !== null && m.s2 !== ""
-    );
-
+  function buildDuprCsv(exportable: any[], filename: string) {
     if (!exportable.length) {
       setMessage("No completed non-forfeit matches to export.");
       return;
     }
 
+    const playerMap = Object.fromEntries(players.map((p) => [p.name, p]));
     const header = ",,,matchType,event,date,playerA1,playerA1DuprId,playerA1ExternalId,playerA2,playerA2DuprId,playerA2ExternalId,playerB1,playerB1DuprId,playerB1ExternalId,playerB2,playerB2DuprId,playerB2ExternalId,,teamAGame1,teamBGame1,teamAGame2,teamBGame2,teamAGame3,teamBGame3,teamAGame4,teamBGame4,teamAGame5,teamBGame5,clubId,scoreType";
 
     const rows = exportable.map((m) => {
@@ -1188,9 +1184,23 @@ const poolMatches = assignMatchesToAvailabilitySlots(
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "dupr_export.csv";
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  function exportDuprCsvPool() {
+    const exportable = matches.filter(
+      (m) => m.stage === "pool" && !m.forfeit && m.s1 !== null && m.s1 !== "" && m.s2 !== null && m.s2 !== ""
+    );
+    buildDuprCsv(exportable, "dupr_pool_export.csv");
+  }
+
+  function exportDuprCsvBracket() {
+    const exportable = matches.filter(
+      (m) => m.stage !== "pool" && !m.forfeit && m.s1 !== null && m.s1 !== "" && m.s2 !== null && m.s2 !== ""
+    );
+    buildDuprCsv(exportable, "dupr_bracket_export.csv");
   }
 
   function renderAvailability(dateIds: string[]) {
@@ -1637,7 +1647,7 @@ const poolMatches = assignMatchesToAvailabilitySlots(
                                 {match.g2_final ? <span className="text-green-600 font-semibold">G2 ✓</span> : <>G2 {g2en && <Button size="sm" variant="outline" className="h-5 px-1.5 text-xs ml-1" onClick={() => finalizeGame(match.id, 2)}>✓ Done</Button>}</>}
                               </div>
                               <div className={`w-28 flex items-center justify-center gap-1 ${!g3en ? "opacity-30" : ""}`}>
-                                G3 {g3en && match.g3_p1 !== null && match.g3_p2 !== null && <Button size="sm" variant="outline" className="h-5 px-1.5 text-xs ml-1" onClick={() => finalizeGame(match.id, 3)}>✓ Match</Button>}
+                                G3 {g3en && <Button size="sm" variant="outline" className="h-5 px-1.5 text-xs ml-1" onClick={() => finalizeGame(match.id, 3)}>✓ Match</Button>}
                               </div>
                             </div>
                             {/* P1 row */}
@@ -1802,9 +1812,12 @@ const poolMatches = assignMatchesToAvailabilitySlots(
                 <p className="text-xs text-muted-foreground">Used for semifinal and final matches.</p>
               </div>
             </div>
-            <Button onClick={exportDuprCsv}>Download DUPR CSV</Button>
+            <div className="flex gap-3 flex-wrap">
+              <Button onClick={exportDuprCsvPool}>Download Pool CSV</Button>
+              <Button variant="outline" onClick={exportDuprCsvBracket}>Download Bracket CSV</Button>
+            </div>
             <p className="text-xs text-muted-foreground">
-              Pool play matches use their scheduled date automatically. After downloading, open in a spreadsheet editor to verify DUPR IDs before uploading.
+              Pool play matches use their scheduled date automatically. Bracket matches use the playoff date above. After downloading, open in a spreadsheet editor to verify DUPR IDs before uploading.
             </p>
           </CardContent>
         </Card>

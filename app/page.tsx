@@ -677,7 +677,7 @@ const filteredMatches = useMemo(() => {
 }, [sortedMatches, selectedPlayer]);
 const approvedPlayers = players.filter((p) => p.status === "approved");
 const standings = useMemo(() => standingsByPool(matches, players), [matches, players]);
-const completed = matches.filter((m) => m.s1 !== "" && m.s2 !== "").length;
+const completed = matches.filter((m) => m.status === "final" || m.status === "forfeit").length;
 const upcoming = matches.length - completed;
 const pools = useMemo(() => chunkIntoPools(players), [players]);
 
@@ -1101,9 +1101,23 @@ const pools = useMemo(() => chunkIntoPools(players), [players]);
                               <Badge variant="default" className="bg-gray-500 text-white">Forfeit</Badge>
                             ) : m.status === "in_progress" ? (
                               <Badge variant="destructive" className="animate-pulse">
-                                🔴 LIVE {m.s1 ?? 0}–{m.s2 ?? 0}
+                                {m.stage !== "pool"
+                                  ? `🔴 LIVE G1: ${m.s1 ?? 0}–${m.s2 ?? 0}${m.g1_final ? ` · G2: ${m.g2_p1 ?? 0}–${m.g2_p2 ?? 0}` : ""}`
+                                  : `🔴 LIVE ${m.s1 ?? 0}–${m.s2 ?? 0}`}
                               </Badge>
-                            ) : m.s1 !== "" && m.s2 !== "" ? (
+                            ) : m.status === "final" ? (
+                              m.stage !== "pool" ? (
+                                <Badge variant="default">
+                                  {[
+                                    m.s1 != null ? `${m.s1}–${m.s2}` : null,
+                                    m.g2_p1 != null ? `${m.g2_p1}–${m.g2_p2}` : null,
+                                    m.g3_p1 != null ? `${m.g3_p1}–${m.g3_p2}` : null,
+                                  ].filter(Boolean).join(", ")}
+                                </Badge>
+                              ) : (
+                                <Badge variant="default">{m.s1}–{m.s2}</Badge>
+                              )
+                            ) : m.s1 !== null && m.s1 !== "" && m.s2 !== null && m.s2 !== "" ? (
                               <Badge variant="default">{m.s1}–{m.s2}</Badge>
                             ) : (
                               <Badge variant="secondary">Upcoming</Badge>
@@ -1119,6 +1133,20 @@ const pools = useMemo(() => chunkIntoPools(players), [players]);
           </TabsContent>
 
           <TabsContent value="finals" className="space-y-6">
+            {/* Champion Banner */}
+            {bracketData.final?.status === "final" && (() => {
+              const result = getPlayoffMatchResult(bracketData.final);
+              const champion = result.winner === "p1" ? bracketData.final.p1 : result.winner === "p2" ? bracketData.final.p2 : null;
+              if (!champion) return null;
+              return (
+                <div className="rounded-2xl bg-gradient-to-b from-amber-400 to-yellow-300 text-amber-900 text-center py-8 px-4 shadow-lg">
+                  <div className="text-5xl mb-2">🏆</div>
+                  <div className="text-xs font-bold uppercase tracking-widest mb-1 opacity-75">Tournament Champion</div>
+                  <div className="text-3xl font-black">{champion}</div>
+                </div>
+              );
+            })()}
+
             {/* Header */}
             <div className="text-center space-y-1">
               <h2 className="text-2xl font-bold tracking-tight">Tournament Bracket</h2>
